@@ -11,6 +11,7 @@ from telethon.errors import (
     ReactionInvalidError,
     UserNotParticipantError,
     MsgIdInvalidError,
+    MessageIdInvalidError,
     ChatWriteForbiddenError,
 )
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
@@ -181,7 +182,7 @@ class Reactor:
                     self.console.print(f"  [yellow]⚠ {phone}: REACTION_INVALID[/yellow]")
                 return ReactionResult(phone, False, "REACTION_INVALID")
 
-            except MsgIdInvalidError:
+            except (MsgIdInvalidError, MessageIdInvalidError):
                 log_error("reaction", phone, "MSG_ID_INVALID")
                 if self.console:
                     self.console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
@@ -189,9 +190,16 @@ class Reactor:
 
             except Exception as e:
                 error_msg = str(e)
+                error_lower = error_msg.lower()
+
+                if "message" in error_lower and "invalid" in error_lower:
+                    log_error("reaction", phone, "MSG_ID_INVALID")
+                    if self.console:
+                        self.console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
+                    return ReactionResult(phone, False, "MSG_ID_INVALID")
+
                 log_error("reaction", phone, error_msg)
 
-                error_lower = error_msg.lower()
                 is_ban = any(x in error_lower for x in ["banned", "deactivated", "spam", "restrict"])
 
                 if is_ban:
