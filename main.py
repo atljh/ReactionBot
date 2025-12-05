@@ -12,7 +12,7 @@ from src.reactor import Reactor
 from src.session_loader import SessionLoader
 from src.parser import LinkParser
 from src.tdata_converter import TDataConverter
-from src.utils import parse_proxy_string, json_read, json_write, log_error
+from src.utils import parse_proxy_string, json_read, json_write, log_error, log_info
 
 
 console = Console()
@@ -338,6 +338,8 @@ async def main():
     reaction_emoji = settings.get_reaction_emoji(args.reaction)
     delay_range = parse_delay(args.delay)
 
+    log_info(f"START | link={args.link} | reaction={reaction_emoji} | count={args.count}")
+
     console.print(f"\n[bold]TG Reacter[/bold]")
     console.print(f"Link: {args.link}")
     if args.invite:
@@ -371,6 +373,8 @@ async def main():
     )
 
     stats = reactor.get_stats()
+
+    log_info(f"END | success={stats['success']} | failed={stats['failed']} | total={stats['total']}")
 
     console.print()
     console.print(f"[green]Success: {stats['success']}[/green]")

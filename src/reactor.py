@@ -19,7 +19,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from .client import BaseThon
 from .database import Database
 from .parser import LinkParser, ParsedLink
-from .utils import log_error, move_account_to_status_folder, get_status_folder
+from .utils import log_error, log_info, log_reaction, move_account_to_status_folder, get_status_folder
 
 
 class ReactionResult:
@@ -136,6 +136,7 @@ class Reactor:
                     if not joined:
                         log_error("reaction", phone, "CANT_JOIN")
                         return ReactionResult(phone, False, "CANT_JOIN")
+                    log_info(f"JOIN | {phone} | channel={actual_channel_id}")
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
                 await self.send_reaction(client, actual_channel_id, message_id, reaction)
@@ -147,6 +148,8 @@ class Reactor:
                     message_id,
                     reaction
                 )
+
+                log_reaction(phone, str(actual_channel_id), message_id, reaction, True)
 
                 delay = random.uniform(*self.delay_range)
                 await asyncio.sleep(delay)
