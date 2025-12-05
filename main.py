@@ -41,17 +41,22 @@ def load_proxies(proxies_file: Path) -> list:
     return proxies
 
 
-def get_converted_phones(sessions_dir: Path) -> set:
-    phones = set()
+def get_existing_sessions(sessions_dir: Path) -> set:
+    existing = set()
     for json_file in sessions_dir.glob("*.json"):
         data = json_read(json_file)
         if data:
             phone = data.get("phone", json_file.stem)
-            phones.add(str(phone).replace("+", ""))
-    return phones
+            existing.add(str(phone).replace("+", ""))
+        existing.add(json_file.stem.replace("+", ""))
+
+    for session_file in sessions_dir.glob("*.session"):
+        existing.add(session_file.stem.replace("+", ""))
+
+    return existing
 
 
-def find_unconverted_tdata(tdatas_dir: Path, converted_phones: set) -> list:
+def find_unconverted_tdata(tdatas_dir: Path, existing_sessions: set) -> list:
     unconverted = []
     if not tdatas_dir.exists():
         return unconverted
@@ -61,7 +66,7 @@ def find_unconverted_tdata(tdatas_dir: Path, converted_phones: set) -> list:
             continue
 
         folder_name = item.name.replace("+", "")
-        if folder_name in converted_phones:
+        if folder_name in existing_sessions:
             continue
 
         tdata_path = item / "tdata"
@@ -76,8 +81,8 @@ def find_unconverted_tdata(tdatas_dir: Path, converted_phones: set) -> list:
 
 
 async def auto_convert_tdata(settings, db: Database, proxies: list):
-    converted_phones = get_converted_phones(settings.sessions_dir)
-    unconverted = find_unconverted_tdata(settings.tdatas_dir, converted_phones)
+    existing_sessions = get_existing_sessions(settings.sessions_dir)
+    unconverted = find_unconverted_tdata(settings.tdatas_dir, existing_sessions)
 
     if not unconverted:
         return 0
