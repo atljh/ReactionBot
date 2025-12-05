@@ -1,0 +1,130 @@
+ДОДАВАННЯ АКАУНТІВ
+==================
+
+ОТРИМАННЯ API CREDENTIALS
+-------------------------
+
+1. Перейдіть на https://my.telegram.org
+2. Увійдіть за номером телефону
+3. Перейдіть в "API development tools"
+4. Створіть нове application
+5. Скопіюйте api_id та api_hash
+
+
+ФОРМАТИ АКАУНТІВ
+----------------
+
+Формат 1: .session + .json
+
+Найпоширеніший формат. Складається з двох файлів:
+  - +380501234567.session - SQLite файл сесії Telethon
+  - +380501234567.json - JSON з метаданими
+
+Структура JSON:
+  {
+      "app_id": 2040,
+      "app_hash": "your_api_hash",
+      "phone": "+380501234567",
+      "device": "Desktop",
+      "sdk": "Windows 10",
+      "app_version": "4.8.0",
+      "lang_code": "en",
+      "string_session": "1AZWarz...",
+      "proxy": {
+          "proxy_type": "socks5",
+          "addr": "1.2.3.4",
+          "port": 5555,
+          "username": "user",
+          "password": "pass"
+      }
+  }
+
+
+Формат 2: tdata
+
+Папка з даними Telegram Desktop:
+  +380501234567/
+    tdata/
+      key_data
+      D877F783D5D3EF8C/
+      ...
+
+
+СПОСОБИ ДОДАВАННЯ
+-----------------
+
+Спосіб 1: Новий акаунт через SMS
+
+  python add_account.py --phone +380501234567 --proxy socks5://user:pass@ip:port
+
+Скрипт:
+  1. Відправить код на телефон
+  2. Запросить ввести код
+  3. Запросить 2FA пароль (якщо є)
+  4. Збереже .session та .json файли
+
+
+Спосіб 2: Імпорт існуючих .session+.json
+
+Скопіюйте пари файлів в папку sessions/:
+  sessions/
+    +380501234567.session
+    +380501234567.json
+    +380507654321.session
+    +380507654321.json
+
+Потім синхронізуйте з БД:
+  python main.py --sync
+
+
+Спосіб 3: Конвертація з tdata
+
+  python convert_tdata.py --tdata /path/to/tdata --proxy socks5://user:pass@ip:port
+
+Скрипт:
+  1. Використовує tdesktop-decrypter для витягнення ключів
+  2. Створює .session файл
+  3. Перевіряє авторизацію
+  4. Зберігає .session та .json
+
+
+Спосіб 4: Масова конвертація tdata
+
+Покладіть tdata папки в tdatas/:
+  tdatas/
+    account1/
+      tdata/
+    account2/
+      tdata/
+
+Запустіть:
+  python convert_all_tdata.py --proxy socks5://user:pass@ip:port
+
+
+ПЕРЕВІРКА АКАУНТІВ
+------------------
+
+Перевірити всі:
+  python checker.py --all
+
+Перевірити один:
+  python checker.py --phone +380501234567
+
+
+TROUBLESHOOTING
+---------------
+
+"No session file or string_session provided"
+  - Перевірте наявність .session файлу
+  - Перевірте що .json містить string_session
+
+"Account is not authorized"
+  - Сесія застаріла або акаунт вилогінений
+  - Потрібно заново авторизуватися через add_account.py
+
+"tdata is protected with local passcode"
+  - Вимкніть локальний пароль в Telegram Desktop:
+    Settings -> Privacy & Security -> Local Passcode -> Turn Off
+
+"tdesktop-decrypter not found"
+  - Встановіть: pip install telegram-desktop-decrypter

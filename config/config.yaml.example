@@ -1,0 +1,28 @@
+api_id: YOUR_API_ID
+api_hash: "YOUR_API_HASH"
+
+sessions_dir: "./sessions"
+tdatas_dir: "./tdatas"
+database: "./database.db"
+proxies_file: "./proxies.txt"
+
+safety:
+  max_reactions_per_day: 20
+  min_account_age_days: 7
+  delay_range: [5, 15]
+
+reactions:
+  thumbsup: "👍"
+  thumbsdown: "👎"
+  heart: "❤️"
+  fire: "🔥"
+  party: "🎉"
+  hundred: "💯"
+  cry: "😢"
+  poop: "💩"
+  clap: "👏"
+  think: "🤔"
+  eyes: "👀"
+  banana: "🍌"
+  strawberry: "🍓"
+  moai: "🗿"
