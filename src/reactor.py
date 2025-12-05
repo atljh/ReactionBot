@@ -2,8 +2,8 @@ import asyncio
 import random
 from typing import Dict, Any, List, Optional, Tuple
 from pathlib import Path
-from telethon.tl.functions.messages import SendReactionRequest, GetMessagesViewsRequest
-from telethon.tl.functions.channels import GetParticipantRequest
+from telethon.tl.functions.messages import SendReactionRequest, GetMessagesViewsRequest, ImportChatInviteRequest
+from telethon.tl.functions.channels import GetParticipantRequest, JoinChannelRequest
 from telethon.tl.types import ReactionEmoji, InputPeerChannel
 from telethon.errors import (
     FloodWaitError,
@@ -57,6 +57,17 @@ class Reactor:
         except Exception:
             return False
 
+    async def join_channel(self, client: BaseThon, channel_id: int, invite_hash: str = None) -> bool:
+        try:
+            if invite_hash:
+                await client.client(ImportChatInviteRequest(invite_hash))
+            else:
+                entity = await client.client.get_entity(channel_id)
+                await client.client(JoinChannelRequest(entity))
+            return True
+        except Exception:
+            return False
+
     async def send_reaction(
         self,
         client: BaseThon,
@@ -94,7 +105,8 @@ class Reactor:
         reaction: str,
         post_link: str,
         parsed: ParsedLink,
-        semaphore: asyncio.Semaphore
+        semaphore: asyncio.Semaphore,
+        invite_hash: str = None
     ) -> ReactionResult:
         phone = account["phone"]
 
@@ -111,40 +123,19 @@ class Reactor:
             client = BaseThon(session_file=session_file, json_data=json_data)
 
             try:
-                check_result = await client.check()
-                if check_result != "OK":
-                    await self.db.set_account_active(account["id"], False)
-                    log_error("reaction", phone, check_result)
-
-                    if self.console:
-                        self.console.print(f"  [red]✗ {phone}: {check_result}[/red]")
-
-                    if self.sessions_dir and get_status_folder(check_result):
-                        moved = move_account_to_status_folder(
-                            session_file, json_file, check_result,
-                            self.sessions_dir, self.tdatas_dir
-                        )
-                        if moved:
-                            folder = get_status_folder(check_result)
-                            self.moved_accounts.append((phone, folder))
-                            if self.console:
-                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
-
-                    return ReactionResult(phone, False, check_result)
-
-                if self.console:
-                    self.console.print(f"  [green]✓ {phone}: OK[/green]")
+                await client.connect()
 
                 if parsed.channel_id == 0:
                     actual_channel_id = await self.resolve_channel(client, parsed)
                 else:
                     actual_channel_id = channel_id
 
-                if parsed.is_private:
-                    is_subscribed = await self.check_subscription(client, actual_channel_id)
-                    if not is_subscribed:
-                        log_error("reaction", phone, "NOT_SUBSCRIBED")
-                        return ReactionResult(phone, False, "NOT_SUBSCRIBED")
+                is_subscribed = await self.check_subscription(client, actual_channel_id)
+                if not is_subscribed:
+                    joined = await self.join_channel(client, actual_channel_id, invite_hash)
+                    if not joined:
+                        log_error("reaction", phone, "CANT_JOIN")
+                        return ReactionResult(phone, False, "CANT_JOIN")
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
                 await self.send_reaction(client, actual_channel_id, message_id, reaction)
@@ -227,19 +218,83 @@ class Reactor:
             finally:
                 await client.disconnect()
 
+    async def check_accounts(self, accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        valid_accounts = []
+
+        for account in accounts:
+            phone = account["phone"]
+            session_file = Path(account["session_file"]) if account.get("session_file") else None
+            json_file = Path(account["json_file"]) if account.get("json_file") else None
+
+            if json_file and json_file.exists():
+                from .utils import json_read
+                json_data = json_read(json_file)
+            else:
+                json_data = {}
+
+            client = BaseThon(session_file=session_file, json_data=json_data)
+
+            try:
+                check_result = await client.check()
+                if check_result != "OK":
+                    await self.db.set_account_active(account["id"], False)
+                    log_error("check", phone, check_result)
+
+                    if self.console:
+                        self.console.print(f"  [red]✗ {phone}: {check_result}[/red]")
+
+                    if self.sessions_dir and get_status_folder(check_result):
+                        moved = move_account_to_status_folder(
+                            session_file, json_file, check_result,
+                            self.sessions_dir, self.tdatas_dir
+                        )
+                        if moved:
+                            folder = get_status_folder(check_result)
+                            self.moved_accounts.append((phone, folder))
+                            if self.console:
+                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                else:
+                    if self.console:
+                        self.console.print(f"  [green]✓ {phone}: OK[/green]")
+                    valid_accounts.append(account)
+
+            except Exception as e:
+                log_error("check", phone, str(e))
+                if self.console:
+                    self.console.print(f"  [red]✗ {phone}: {str(e)[:30]}[/red]")
+
+            finally:
+                await client.disconnect()
+
+        return valid_accounts
+
+    @staticmethod
+    def parse_invite_hash(invite_link: str) -> Optional[str]:
+        if not invite_link:
+            return None
+        invite_link = invite_link.strip()
+        if "/+" in invite_link:
+            return invite_link.split("/+")[-1]
+        if "joinchat/" in invite_link:
+            return invite_link.split("joinchat/")[-1]
+        return None
+
     async def run(
         self,
         post_link: str,
         reaction: str,
         count: int,
         threads: int = 5,
-        dry_run: bool = False
+        dry_run: bool = False,
+        invite_link: str = None
     ) -> List[ReactionResult]:
         self.results = []
 
         parsed = LinkParser.parse(post_link)
         if not parsed:
             raise ValueError(f"Invalid link: {post_link}")
+
+        invite_hash = self.parse_invite_hash(invite_link)
 
         channel_id = parsed.channel_id
         message_id = parsed.message_id
@@ -252,10 +307,25 @@ class Reactor:
         )
 
         if not accounts:
+            if self.console:
+                self.console.print("[yellow]No available accounts[/yellow]")
             return []
 
+        if self.console:
+            self.console.print(f"\n[bold]Checking {len(accounts)} accounts...[/bold]")
+
+        valid_accounts = await self.check_accounts(accounts)
+
+        if not valid_accounts:
+            if self.console:
+                self.console.print("[yellow]No valid accounts after check[/yellow]")
+            return []
+
+        if self.console:
+            self.console.print(f"\n[bold]Sending reactions...[/bold]")
+
         if dry_run:
-            for acc in accounts:
+            for acc in valid_accounts:
                 self.results.append(ReactionResult(acc["phone"], True, "DRY_RUN"))
             return self.results
 
@@ -268,18 +338,18 @@ class Reactor:
             TaskProgressColumn(),
             TextColumn("[cyan]{task.completed}/{task.total}"),
         ) as progress:
-            task = progress.add_task(f"Reactions", total=len(accounts))
+            task = progress.add_task(f"Reactions", total=len(valid_accounts))
 
             async def process_with_progress(account):
                 result = await self.process_account(
-                    account, channel_id, message_id, reaction, post_link, parsed, semaphore
+                    account, channel_id, message_id, reaction, post_link, parsed, semaphore, invite_hash
                 )
                 self.results.append(result)
                 progress.advance(task)
                 return result
 
             await asyncio.gather(
-                *[process_with_progress(acc) for acc in accounts],
+                *[process_with_progress(acc) for acc in valid_accounts],
                 return_exceptions=True
             )
 

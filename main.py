@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 import asyncio
 import sys
@@ -231,6 +230,10 @@ async def main():
         help="Test run without sending reactions"
     )
     parser.add_argument(
+        "--invite", "-i",
+        help="Invite link for private channels (https://t.me/+XXX)"
+    )
+    parser.add_argument(
         "--config",
         help="Path to config.yaml"
     )
@@ -337,6 +340,8 @@ async def main():
 
     console.print(f"\n[bold]TG Reacter[/bold]")
     console.print(f"Link: {args.link}")
+    if args.invite:
+        console.print(f"Invite: {args.invite}")
     console.print(f"Reaction: {reaction_emoji}")
     console.print(f"Count: {args.count}")
     console.print(f"Threads: {args.threads}")
@@ -346,8 +351,6 @@ async def main():
     console.print()
 
     await sync_sessions(db, loader, proxies)
-
-    console.print("[bold]Checking accounts...[/bold]\n")
 
     reactor = Reactor(
         database=db,
@@ -363,7 +366,8 @@ async def main():
         reaction=reaction_emoji,
         count=args.count,
         threads=args.threads,
-        dry_run=args.dry_run
+        dry_run=args.dry_run,
+        invite_link=args.invite
     )
 
     stats = reactor.get_stats()
