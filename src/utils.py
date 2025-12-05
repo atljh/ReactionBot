@@ -6,22 +6,38 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 _error_logger = None
+_info_logger = None
 
 
-def get_error_logger() -> logging.Logger:
-    global _error_logger
+def _setup_loggers():
+    global _error_logger, _info_logger
+
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
+
     if _error_logger is None:
-        logs_dir = Path("logs")
-        logs_dir.mkdir(exist_ok=True)
-
         _error_logger = logging.getLogger("tg_reacter_errors")
         _error_logger.setLevel(logging.ERROR)
-
         handler = logging.FileHandler(logs_dir / "errors.log", encoding="utf-8")
         handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
         _error_logger.addHandler(handler)
 
+    if _info_logger is None:
+        _info_logger = logging.getLogger("tg_reacter")
+        _info_logger.setLevel(logging.INFO)
+        handler = logging.FileHandler(logs_dir / "reacter.log", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+        _info_logger.addHandler(handler)
+
+
+def get_error_logger() -> logging.Logger:
+    _setup_loggers()
     return _error_logger
+
+
+def get_logger() -> logging.Logger:
+    _setup_loggers()
+    return _info_logger
 
 
 def log_error(source: str, message: str, details: str = ""):
@@ -30,6 +46,15 @@ def log_error(source: str, message: str, details: str = ""):
     if details:
         log_line += f" | {details}"
     logger.error(log_line)
+
+
+def log_info(message: str):
+    get_logger().info(message)
+
+
+def log_reaction(phone: str, channel: str, message_id: int, reaction: str, success: bool):
+    status = "OK" if success else "FAIL"
+    get_logger().info(f"REACTION | {phone} | {channel}/{message_id} | {reaction} | {status}")
 
 
 def json_read(path: Path) -> Optional[Dict[str, Any]]:
