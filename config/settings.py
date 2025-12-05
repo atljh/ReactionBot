@@ -1,4 +1,5 @@
 import os
+import random
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 import yaml
@@ -63,9 +64,15 @@ class Settings:
 
     @property
     def reactions(self) -> Dict[str, str]:
-        return self._config.get("reactions", {})
+        default = {"thumbsup": "👍", "heart": "❤️", "fire": "🔥", "clap": "👏", "party": "🎉"}
+        return self._config.get("reactions", default)
+
+    def get_random_reaction(self) -> str:
+        return random.choice(list(self.reactions.values()))
 
     def get_reaction_emoji(self, name: str) -> str:
+        if not name:
+            return self.get_random_reaction()
         return self.reactions.get(name, name)
 
 
