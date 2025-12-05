@@ -56,7 +56,19 @@ def get_existing_sessions(sessions_dir: Path) -> set:
     return existing
 
 
-def find_unconverted_tdata(tdatas_dir: Path, existing_sessions: set) -> list:
+def load_tdata_cache(tdatas_dir: Path) -> dict:
+    cache_file = tdatas_dir / ".converted_cache.json"
+    if cache_file.exists():
+        return json_read(cache_file) or {}
+    return {}
+
+
+def save_tdata_cache(tdatas_dir: Path, cache: dict):
+    cache_file = tdatas_dir / ".converted_cache.json"
+    json_write(cache_file, cache)
+
+
+def find_unconverted_tdata(tdatas_dir: Path, existing_sessions: set, tdata_cache: dict) -> list:
     unconverted = []
     if not tdatas_dir.exists():
         return unconverted
@@ -66,6 +78,10 @@ def find_unconverted_tdata(tdatas_dir: Path, existing_sessions: set) -> list:
             continue
 
         folder_name = item.name.replace("+", "")
+
+        if folder_name in tdata_cache:
+            continue
+
         if folder_name in existing_sessions:
             continue
 
@@ -82,7 +98,8 @@ def find_unconverted_tdata(tdatas_dir: Path, existing_sessions: set) -> list:
 
 async def auto_convert_tdata(settings, db: Database, proxies: list):
     existing_sessions = get_existing_sessions(settings.sessions_dir)
-    unconverted = find_unconverted_tdata(settings.tdatas_dir, existing_sessions)
+    tdata_cache = load_tdata_cache(settings.tdatas_dir)
+    unconverted = find_unconverted_tdata(settings.tdatas_dir, existing_sessions, tdata_cache)
 
     if not unconverted:
         return 0
@@ -115,6 +132,14 @@ async def auto_convert_tdata(settings, db: Database, proxies: list):
                 )
 
                 phone = metadata.get("phone", "unknown")
+
+                tdata_cache[name] = phone
+                save_tdata_cache(settings.tdatas_dir, tdata_cache)
+
+                if metadata.get("already_exists"):
+                    console.print(f"  [dim]~ Skipped: {name} -> {phone} (already exists)[/dim]")
+                    continue
+
                 await db.add_account(
                     phone=phone,
                     session_file=session_file,
@@ -126,9 +151,11 @@ async def auto_convert_tdata(settings, db: Database, proxies: list):
                 converted += 1
 
             except Exception as e:
+                import traceback
                 error_msg = str(e)
+                full_traceback = traceback.format_exc()
                 console.print(f"  [red]x Failed: {name} - {error_msg[:50]}[/red]")
-                log_error("tdata_convert", name, error_msg)
+                log_error("tdata_convert", name, f"{error_msg}\n{full_traceback}")
 
             progress.advance(task)
 
@@ -320,10 +347,15 @@ async def main():
 
     await sync_sessions(db, loader, proxies)
 
+    console.print("[bold]Checking accounts...[/bold]\n")
+
     reactor = Reactor(
         database=db,
         delay_range=delay_range,
-        max_reactions_per_day=settings.max_reactions_per_day
+        max_reactions_per_day=settings.max_reactions_per_day,
+        sessions_dir=settings.sessions_dir,
+        tdatas_dir=settings.tdatas_dir,
+        console=console
     )
 
     results = await reactor.run(
@@ -340,13 +372,18 @@ async def main():
     console.print(f"[green]Success: {stats['success']}[/green]")
     console.print(f"[red]Failed: {stats['failed']}[/red]")
 
+    if reactor.moved_accounts:
+        console.print(f"\n[yellow]Moved accounts: {len(reactor.moved_accounts)}[/yellow]")
+        for phone, folder in reactor.moved_accounts:
+            console.print(f"  - {phone} -> sessions_{folder}/")
+
     if stats['errors']:
         console.print("\nErrors:")
         for error, count in stats['errors'].items():
             console.print(f"  - {error}: {count}")
 
     for r in results:
-        if not r.success:
+        if not r.success and r.phone not in [p for p, _ in reactor.moved_accounts]:
             console.print(f"  [dim]{r.phone}: {r.error}[/dim]")
 
     await db.close()

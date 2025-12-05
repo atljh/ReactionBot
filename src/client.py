@@ -7,6 +7,8 @@ from telethon.errors import (
     UserDeactivatedBanError,
     AuthKeyUnregisteredError,
     SessionRevokedError,
+    UserRestrictedError,
+    PhoneNumberBannedError,
 )
 from .utils import proxy_to_telethon
 
@@ -107,17 +109,28 @@ class BaseThon:
         try:
             await self.client.connect()
             if not await self.client.is_user_authorized():
-                return "ERROR_AUTH:UNAUTHORIZED"
+                return "UNAUTHORIZED"
             self._me = await self.client.get_me()
             return "OK"
-        except (UserDeactivatedError, UserDeactivatedBanError):
-            return "ERROR_AUTH:BANNED"
+        except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
+            return "BANNED"
         except (AuthKeyUnregisteredError, SessionRevokedError):
-            return "ERROR_AUTH:SESSION_REVOKED"
+            return "SESSION_REVOKED"
+        except UserRestrictedError:
+            return "RESTRICTED"
         except ConnectionError:
-            return "ERROR_CONNECTION"
+            return "CONNECTION_ERROR"
         except Exception as e:
-            return f"ERROR_UNKNOWN:{str(e)}"
+            error_str = str(e).lower()
+            if "spam" in error_str or "spambot" in error_str:
+                return "SPAM"
+            if "flood" in error_str:
+                return "FLOOD"
+            if "frozen" in error_str:
+                return "FROZEN"
+            if "restrict" in error_str:
+                return "RESTRICTED"
+            return f"ERROR:{str(e)[:50]}"
 
     async def get_me(self):
         if self._me is None:

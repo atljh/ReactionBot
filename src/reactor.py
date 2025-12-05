@@ -18,7 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from .client import BaseThon
 from .database import Database
 from .parser import LinkParser, ParsedLink
-from .utils import log_error
+from .utils import log_error, move_account_to_status_folder, get_status_folder
 
 
 class ReactionResult:
@@ -33,12 +33,19 @@ class Reactor:
         self,
         database: Database,
         delay_range: Tuple[int, int] = (5, 15),
-        max_reactions_per_day: int = 20
+        max_reactions_per_day: int = 20,
+        sessions_dir: Optional[Path] = None,
+        tdatas_dir: Optional[Path] = None,
+        console = None
     ):
         self.db = database
         self.delay_range = delay_range
         self.max_reactions_per_day = max_reactions_per_day
+        self.sessions_dir = sessions_dir
+        self.tdatas_dir = tdatas_dir
+        self.console = console
         self.results: List[ReactionResult] = []
+        self.moved_accounts: List[Tuple[str, str]] = []
 
     async def check_subscription(self, client: BaseThon, channel_id: int) -> bool:
         try:
@@ -107,7 +114,25 @@ class Reactor:
                 if check_result != "OK":
                     await self.db.set_account_active(account["id"], False)
                     log_error("reaction", phone, check_result)
+
+                    if self.console:
+                        self.console.print(f"  [red]✗ {phone}: {check_result}[/red]")
+
+                    if self.sessions_dir and get_status_folder(check_result):
+                        moved = move_account_to_status_folder(
+                            session_file, json_file, check_result,
+                            self.sessions_dir, self.tdatas_dir
+                        )
+                        if moved:
+                            folder = get_status_folder(check_result)
+                            self.moved_accounts.append((phone, folder))
+                            if self.console:
+                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+
                     return ReactionResult(phone, False, check_result)
+
+                if self.console:
+                    self.console.print(f"  [green]✓ {phone}: OK[/green]")
 
                 if parsed.channel_id == 0:
                     actual_channel_id = await self.resolve_channel(client, parsed)
@@ -137,22 +162,58 @@ class Reactor:
                 return ReactionResult(phone, True)
 
             except FloodWaitError as e:
-                error_msg = f"FLOOD_WAIT:{e.seconds}s"
+                error_msg = f"FLOOD:{e.seconds}s"
                 log_error("reaction", phone, error_msg)
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: {error_msg}[/yellow]")
                 return ReactionResult(phone, False, error_msg)
 
             except ChannelPrivateError:
                 await self.db.update_subscription(account["id"], channel_id, False)
                 log_error("reaction", phone, "CHANNEL_PRIVATE")
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: CHANNEL_PRIVATE[/yellow]")
                 return ReactionResult(phone, False, "CHANNEL_PRIVATE")
 
             except ReactionInvalidError:
                 log_error("reaction", phone, "REACTION_INVALID")
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: REACTION_INVALID[/yellow]")
                 return ReactionResult(phone, False, "REACTION_INVALID")
+
+            except MsgIdInvalidError:
+                log_error("reaction", phone, "MSG_ID_INVALID")
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
+                return ReactionResult(phone, False, "MSG_ID_INVALID")
 
             except Exception as e:
                 error_msg = str(e)
                 log_error("reaction", phone, error_msg)
+
+                error_lower = error_msg.lower()
+                is_ban = any(x in error_lower for x in ["banned", "deactivated", "spam", "restrict"])
+
+                if is_ban:
+                    await self.db.set_account_active(account["id"], False)
+                    if self.console:
+                        self.console.print(f"  [red]✗ {phone}: {error_msg[:40]}[/red]")
+
+                    if self.sessions_dir:
+                        status = "BANNED" if "banned" in error_lower else "SPAM" if "spam" in error_lower else "RESTRICTED"
+                        moved = move_account_to_status_folder(
+                            session_file, json_file, status,
+                            self.sessions_dir, self.tdatas_dir
+                        )
+                        if moved:
+                            folder = get_status_folder(status)
+                            self.moved_accounts.append((phone, folder))
+                            if self.console:
+                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                else:
+                    if self.console:
+                        self.console.print(f"  [yellow]⚠ {phone}: {error_msg[:40]}[/yellow]")
+
                 return ReactionResult(phone, False, error_msg[:50])
 
             finally:

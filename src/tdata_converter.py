@@ -68,11 +68,12 @@ class TDataConverter:
 
             me = await client.get_me()
             phone = me.phone or "unknown"
+            phone_clean = phone.replace("+", "") if phone else "unknown"
 
             metadata = {
                 "app_id": self.api_id,
                 "app_hash": self.api_hash,
-                "phone": phone,
+                "phone": phone_clean,
                 "telegram_id": me.id,
                 "username": me.username,
                 "first_name": me.first_name,
@@ -92,8 +93,11 @@ class TDataConverter:
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
 
-        session_file = output_path / f"{phone}.session"
-        json_file = output_path / f"{phone}.json"
+        session_file = output_path / f"{phone_clean}.session"
+        json_file = output_path / f"{phone_clean}.json"
+
+        if session_file.exists() and json_file.exists():
+            return str(session_file), str(json_file), {"phone": phone_clean, "already_exists": True}
 
         self._create_sqlite_session(account_data, session_file)
 
@@ -147,8 +151,20 @@ class TDataConverter:
         auth_key = bytes.fromhex(auth_key_hex)
         server_address, port = DC_SERVERS.get(dc_id, (f"dc{dc_id}.telegram.org", 443))
 
+        if output_path.exists():
+            output_path.unlink()
+        journal = output_path.with_suffix(".session-journal")
+        if journal.exists():
+            journal.unlink()
+
         conn = sqlite3.connect(str(output_path))
         c = conn.cursor()
+
+        c.execute("DROP TABLE IF EXISTS sessions")
+        c.execute("DROP TABLE IF EXISTS entities")
+        c.execute("DROP TABLE IF EXISTS sent_files")
+        c.execute("DROP TABLE IF EXISTS update_state")
+        c.execute("DROP TABLE IF EXISTS version")
 
         c.execute("""
             CREATE TABLE sessions (
@@ -198,7 +214,7 @@ class TDataConverter:
 
         c.execute("INSERT INTO version VALUES (8)")
         c.execute(
-            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO sessions VALUES (?, ?, ?, ?, ?)",
             (dc_id, server_address, port, auth_key, None)
         )
 

@@ -144,3 +144,69 @@ def format_phone(phone: str) -> str:
 
 def get_timestamp() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+STATUS_FOLDERS = {
+    "BANNED": "banned",
+    "SESSION_REVOKED": "revoked",
+    "RESTRICTED": "restricted",
+    "SPAM": "spam",
+    "FROZEN": "frozen",
+    "UNAUTHORIZED": "unauthorized",
+    "FLOOD": "flood",
+}
+
+
+def get_status_folder(status: str) -> Optional[str]:
+    for key, folder in STATUS_FOLDERS.items():
+        if key in status.upper():
+            return folder
+    if status.startswith("ERROR:"):
+        return "errors"
+    return None
+
+
+def move_account_to_status_folder(
+    session_file: Path,
+    json_file: Path,
+    status: str,
+    sessions_dir: Path,
+    tdatas_dir: Optional[Path] = None
+) -> bool:
+    folder_name = get_status_folder(status)
+    if not folder_name:
+        return False
+
+    target_dir = sessions_dir.parent / f"sessions_{folder_name}"
+    target_dir.mkdir(exist_ok=True)
+
+    try:
+        if session_file and session_file.exists():
+            session_file.rename(target_dir / session_file.name)
+
+        journal_file = session_file.with_suffix(".session-journal")
+        if journal_file.exists():
+            journal_file.rename(target_dir / journal_file.name)
+
+        if json_file and json_file.exists():
+            json_file.rename(target_dir / json_file.name)
+
+        if tdatas_dir:
+            phone_clean = session_file.stem.replace("+", "")
+            tdata_source = None
+
+            for item in tdatas_dir.iterdir():
+                if item.is_dir() and item.name.replace("+", "") == phone_clean:
+                    tdata_source = item
+                    break
+
+            if tdata_source:
+                tdata_target_dir = tdatas_dir.parent / f"tdatas_{folder_name}"
+                tdata_target_dir.mkdir(exist_ok=True)
+                tdata_source.rename(tdata_target_dir / tdata_source.name)
+
+        return True
+
+    except Exception as e:
+        log_error("move_account", str(session_file), str(e))
+        return False
