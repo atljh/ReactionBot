@@ -30,26 +30,42 @@ def parse_proxy_string(proxy_str: str) -> Optional[Dict[str, Any]]:
 
     if "://" in proxy_str:
         protocol, rest = proxy_str.split("://", 1)
-    else:
-        protocol = "socks5"
-        rest = proxy_str
 
-    if "@" in rest:
-        auth, host_port = rest.rsplit("@", 1)
-        if ":" in auth:
-            username, password = auth.split(":", 1)
+        if "@" in rest:
+            auth, host_port = rest.rsplit("@", 1)
+            if ":" in auth:
+                username, password = auth.split(":", 1)
+            else:
+                username, password = auth, ""
         else:
-            username, password = auth, ""
-    else:
-        host_port = rest
-        username, password = None, None
+            host_port = rest
+            username, password = None, None
 
-    if ":" in host_port:
-        host, port_str = host_port.rsplit(":", 1)
-        port = int(port_str)
+        if ":" in host_port:
+            host, port_str = host_port.rsplit(":", 1)
+            port = int(port_str)
+        else:
+            host = host_port
+            port = 1080
+
     else:
-        host = host_port
-        port = 1080
+        parts = proxy_str.split(":")
+
+        if len(parts) == 4:
+            host, port_str, username, password = parts
+            port = int(port_str)
+        elif len(parts) == 3:
+            host, port_str, username = parts
+            port = int(port_str)
+            password = ""
+        elif len(parts) == 2:
+            host, port_str = parts
+            port = int(port_str)
+            username, password = None, None
+        else:
+            return None
+
+        protocol = "socks5"
 
     result = {
         "proxy_type": protocol,

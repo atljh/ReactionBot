@@ -5,12 +5,15 @@ import sys
 from pathlib import Path
 from rich.console import Console
 from rich.table import Table
+from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from config import get_settings
 from src.database import Database
 from src.reactor import Reactor
 from src.session_loader import SessionLoader
 from src.parser import LinkParser
+from src.tdata_converter import TDataConverter
+from src.utils import parse_proxy_string, json_read, json_write
 
 
 console = Console()
@@ -24,10 +27,122 @@ def parse_delay(delay_str: str) -> tuple:
     return val, val
 
 
-async def sync_sessions(db: Database, loader: SessionLoader):
+def load_proxies(proxies_file: Path) -> list:
+    if not proxies_file.exists():
+        return []
+    proxies = []
+    with open(proxies_file, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                proxy = parse_proxy_string(line)
+                if proxy:
+                    proxies.append(proxy)
+    return proxies
+
+
+def get_converted_phones(sessions_dir: Path) -> set:
+    phones = set()
+    for json_file in sessions_dir.glob("*.json"):
+        data = json_read(json_file)
+        if data:
+            phone = data.get("phone", json_file.stem)
+            phones.add(str(phone).replace("+", ""))
+    return phones
+
+
+def find_unconverted_tdata(tdatas_dir: Path, converted_phones: set) -> list:
+    unconverted = []
+    if not tdatas_dir.exists():
+        return unconverted
+
+    for item in tdatas_dir.iterdir():
+        if not item.is_dir():
+            continue
+
+        folder_name = item.name.replace("+", "")
+        if folder_name in converted_phones:
+            continue
+
+        tdata_path = item / "tdata"
+        if tdata_path.exists():
+            unconverted.append((item.name, tdata_path))
+        else:
+            key_files = ["key_data", "key_datas"]
+            if any((item / kf).exists() for kf in key_files):
+                unconverted.append((item.name, item))
+
+    return unconverted
+
+
+async def auto_convert_tdata(settings, db: Database, proxies: list):
+    converted_phones = get_converted_phones(settings.sessions_dir)
+    unconverted = find_unconverted_tdata(settings.tdatas_dir, converted_phones)
+
+    if not unconverted:
+        return 0
+
+    console.print(f"\n[yellow]Found {len(unconverted)} unconverted tdata folders[/yellow]")
+
+    if not proxies:
+        console.print("[red]No proxies in proxies.txt! Cannot convert tdata without proxy.[/red]")
+        return 0
+
+    converter = TDataConverter(settings.api_id, settings.api_hash)
+    converted = 0
+    proxy_index = 0
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+    ) as progress:
+        task = progress.add_task("Converting tdata...", total=len(unconverted))
+
+        for name, tdata_path in unconverted:
+            proxy = proxies[proxy_index % len(proxies)]
+            proxy_index += 1
+
+            try:
+                session_file, json_file, metadata = await converter.convert(
+                    str(tdata_path),
+                    str(settings.sessions_dir),
+                    proxy
+                )
+
+                phone = metadata.get("phone", "unknown")
+                await db.add_account(
+                    phone=phone,
+                    session_file=session_file,
+                    json_file=json_file,
+                    proxy=str(proxy) if proxy else None
+                )
+
+                console.print(f"  [green]+ Converted: {name} -> {phone}[/green]")
+                converted += 1
+
+            except Exception as e:
+                console.print(f"  [red]x Failed: {name} - {str(e)[:50]}[/red]")
+
+            progress.advance(task)
+
+    return converted
+
+
+async def sync_sessions(db: Database, loader: SessionLoader, proxies: list):
+    proxy_index = 0
+    synced = 0
+
     for session_file, json_file, json_data in loader.find_sessions():
         phone = json_data.get("phone", session_file.stem)
         proxy = json_data.get("proxy")
+
+        if not proxy and proxies:
+            proxy = proxies[proxy_index % len(proxies)]
+            proxy_index += 1
+            json_data["proxy"] = proxy
+            json_write(json_file, json_data)
+            console.print(f"  [cyan]~ Assigned proxy to: {phone}[/cyan]")
+
         proxy_str = str(proxy) if proxy else None
 
         existing = await db.get_account(phone)
@@ -38,7 +153,10 @@ async def sync_sessions(db: Database, loader: SessionLoader):
                 json_file=str(json_file),
                 proxy=proxy_str
             )
-            console.print(f"[green]+ Added account: {phone}[/green]")
+            console.print(f"  [green]+ Added account: {phone}[/green]")
+            synced += 1
+
+    return synced
 
 
 async def main():
@@ -97,6 +215,11 @@ async def main():
         action="store_true",
         help="Clear reaction history for specified post"
     )
+    parser.add_argument(
+        "--no-convert",
+        action="store_true",
+        help="Skip auto-conversion of tdata folders"
+    )
 
     args = parser.parse_args()
 
@@ -111,10 +234,17 @@ async def main():
     await db.connect()
 
     loader = SessionLoader(settings.sessions_dir)
+    proxies = load_proxies(settings.proxies_file)
+
+    if proxies:
+        console.print(f"[dim]Loaded {len(proxies)} proxies[/dim]")
+
+    if not args.no_convert:
+        await auto_convert_tdata(settings, db, proxies)
 
     if args.sync:
-        await sync_sessions(db, loader)
-        console.print("[green]Sync completed![/green]")
+        synced = await sync_sessions(db, loader, proxies)
+        console.print(f"[green]Sync completed! Added: {synced}[/green]")
         await db.close()
         return
 
@@ -125,13 +255,24 @@ async def main():
         table.add_column("Phone", style="cyan")
         table.add_column("Active", style="green")
         table.add_column("Today", style="yellow")
+        table.add_column("Proxy")
         table.add_column("Last Used")
 
         for acc in accounts:
+            proxy_info = "-"
+            if acc.get("proxy"):
+                try:
+                    p = eval(acc["proxy"]) if isinstance(acc["proxy"], str) else acc["proxy"]
+                    if isinstance(p, dict):
+                        proxy_info = f"{p.get('addr', '?')}:{p.get('port', '?')}"
+                except:
+                    proxy_info = "yes"
+
             table.add_row(
                 acc["phone"],
                 "Yes" if acc["is_active"] else "No",
                 str(acc["reactions_today"] or 0),
+                proxy_info,
                 str(acc["last_used"] or "Never")[:19]
             )
 
@@ -170,7 +311,7 @@ async def main():
         console.print("[yellow]DRY RUN MODE[/yellow]")
     console.print()
 
-    await sync_sessions(db, loader)
+    await sync_sessions(db, loader, proxies)
 
     reactor = Reactor(
         database=db,
