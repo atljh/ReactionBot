@@ -18,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from .client import BaseThon
 from .database import Database
 from .parser import LinkParser, ParsedLink
+from .utils import log_error
 
 
 class ReactionResult:
@@ -105,6 +106,7 @@ class Reactor:
                 check_result = await client.check()
                 if check_result != "OK":
                     await self.db.set_account_active(account["id"], False)
+                    log_error("reaction", phone, check_result)
                     return ReactionResult(phone, False, check_result)
 
                 if parsed.channel_id == 0:
@@ -115,6 +117,7 @@ class Reactor:
                 if parsed.is_private:
                     is_subscribed = await self.check_subscription(client, actual_channel_id)
                     if not is_subscribed:
+                        log_error("reaction", phone, "NOT_SUBSCRIBED")
                         return ReactionResult(phone, False, "NOT_SUBSCRIBED")
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
@@ -134,17 +137,23 @@ class Reactor:
                 return ReactionResult(phone, True)
 
             except FloodWaitError as e:
-                return ReactionResult(phone, False, f"FLOOD_WAIT:{e.seconds}s")
+                error_msg = f"FLOOD_WAIT:{e.seconds}s"
+                log_error("reaction", phone, error_msg)
+                return ReactionResult(phone, False, error_msg)
 
             except ChannelPrivateError:
                 await self.db.update_subscription(account["id"], channel_id, False)
+                log_error("reaction", phone, "CHANNEL_PRIVATE")
                 return ReactionResult(phone, False, "CHANNEL_PRIVATE")
 
             except ReactionInvalidError:
+                log_error("reaction", phone, "REACTION_INVALID")
                 return ReactionResult(phone, False, "REACTION_INVALID")
 
             except Exception as e:
-                return ReactionResult(phone, False, str(e)[:50])
+                error_msg = str(e)
+                log_error("reaction", phone, error_msg)
+                return ReactionResult(phone, False, error_msg[:50])
 
             finally:
                 await client.disconnect()

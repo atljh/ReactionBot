@@ -9,7 +9,7 @@ from config import get_settings
 from src.database import Database
 from src.session_loader import SessionLoader
 from src.client import BaseThon
-from src.utils import json_read
+from src.utils import json_read, log_error
 
 
 console = Console()
@@ -25,9 +25,12 @@ async def check_account(session_file: Path, json_data: dict) -> tuple:
             me = await client.get_me()
             username = f"@{me.username}" if me.username else "-"
             return phone, "OK", username
+        log_error("checker", phone, result)
         return phone, result, "-"
     except Exception as e:
-        return phone, f"ERROR:{str(e)[:30]}", "-"
+        error_msg = str(e)
+        log_error("checker", phone, error_msg)
+        return phone, f"ERROR:{error_msg[:30]}", "-"
     finally:
         await client.disconnect()
 

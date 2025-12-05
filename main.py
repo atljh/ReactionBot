@@ -13,7 +13,7 @@ from src.reactor import Reactor
 from src.session_loader import SessionLoader
 from src.parser import LinkParser
 from src.tdata_converter import TDataConverter
-from src.utils import parse_proxy_string, json_read, json_write
+from src.utils import parse_proxy_string, json_read, json_write, log_error
 
 
 console = Console()
@@ -126,7 +126,9 @@ async def auto_convert_tdata(settings, db: Database, proxies: list):
                 converted += 1
 
             except Exception as e:
-                console.print(f"  [red]x Failed: {name} - {str(e)[:50]}[/red]")
+                error_msg = str(e)
+                console.print(f"  [red]x Failed: {name} - {error_msg[:50]}[/red]")
+                log_error("tdata_convert", name, error_msg)
 
             progress.advance(task)
 

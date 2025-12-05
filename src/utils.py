@@ -1,8 +1,35 @@
 import json
 import random
+import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
+
+_error_logger = None
+
+
+def get_error_logger() -> logging.Logger:
+    global _error_logger
+    if _error_logger is None:
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+
+        _error_logger = logging.getLogger("tg_reacter_errors")
+        _error_logger.setLevel(logging.ERROR)
+
+        handler = logging.FileHandler(logs_dir / "errors.log", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+        _error_logger.addHandler(handler)
+
+    return _error_logger
+
+
+def log_error(source: str, message: str, details: str = ""):
+    logger = get_error_logger()
+    log_line = f"{source} | {message}"
+    if details:
+        log_line += f" | {details}"
+    logger.error(log_line)
 
 
 def json_read(path: Path) -> Optional[Dict[str, Any]]:

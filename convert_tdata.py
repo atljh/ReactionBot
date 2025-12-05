@@ -6,7 +6,7 @@ from rich.console import Console
 from config import get_settings
 from src.database import Database
 from src.tdata_converter import TDataConverter
-from src.utils import parse_proxy_string
+from src.utils import parse_proxy_string, log_error
 
 
 console = Console()
@@ -89,14 +89,17 @@ async def main():
         console.print(f"\n[green]Account added to database![/green]")
 
     except FileNotFoundError as e:
+        log_error("convert_tdata", str(tdata_path), str(e))
         console.print(f"\n[red]Error: {e}[/red]")
         console.print("\nInstall telegram-desktop-decrypter:")
         console.print("  pip install telegram-desktop-decrypter")
 
     except ValueError as e:
+        log_error("convert_tdata", str(tdata_path), str(e))
         console.print(f"\n[red]Error: {e}[/red]")
 
     except Exception as e:
+        log_error("convert_tdata", str(tdata_path), str(e))
         console.print(f"\n[red]Error: {e}[/red]")
 
 
