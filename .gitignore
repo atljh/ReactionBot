@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 .env
 venv/
+WARP.md
 .venv/
 *.egg-info/
 dist/
