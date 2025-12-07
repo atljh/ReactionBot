@@ -68,8 +68,23 @@ class Reactor:
         channel_id: int,
         invite_hash: str = None,
         phone: Optional[str] = None,
+        is_private: bool = False,
     ) -> str:
         phone_label = phone or getattr(client, "phone", "UNKNOWN")
+
+        # For private /c/ links (or tg://privatepost) we cannot resolve the
+        # channel by ID alone for accounts that are not already members.
+        # In that case an explicit invite hash is required, otherwise
+        # Telethon raises "Could not find the input entity for PeerChannel".
+        if is_private and not invite_hash:
+            status = "CHANNEL_PRIVATE"
+            msg = f"{status}: invite link is required to join a private channel"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: CHANNEL_PRIVATE – private link without invite; use --invite[/yellow]"
+                )
+            return status
 
         try:
             if invite_hash:
@@ -213,7 +228,13 @@ class Reactor:
 
                 is_subscribed = await self.check_subscription(client, actual_channel_id)
                 if not is_subscribed:
-                    join_status = await self.join_channel(client, actual_channel_id, invite_hash, phone)
+                    join_status = await self.join_channel(
+                        client,
+                        actual_channel_id,
+                        invite_hash,
+                        phone,
+                        parsed.is_private,
+                    )
                     if join_status != "OK":
                         log_error("reaction", phone, join_status)
                         if self.console:
