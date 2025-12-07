@@ -237,10 +237,10 @@ class Reactor:
             finally:
                 await client.disconnect()
 
-    async def check_accounts(self, accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        valid_accounts = []
+    async def check_accounts(self, accounts: List[Dict[str, Any]], threads: int) -> List[Dict[str, Any]]:
+        semaphore = asyncio.Semaphore(max(1, threads))
 
-        for account in accounts:
+        async def check_one(account: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             phone = account["phone"]
             session_file = Path(account["session_file"]) if account.get("session_file") else None
             json_file = Path(account["json_file"]) if account.get("json_file") else None
@@ -254,7 +254,9 @@ class Reactor:
             client = BaseThon(session_file=session_file, json_data=json_data)
 
             try:
-                check_result = await client.check()
+                async with semaphore:
+                    check_result = await client.check()
+
                 if check_result != "OK":
                     await self.db.set_account_active(account["id"], False)
                     log_error("check", phone, check_result)
@@ -272,20 +274,23 @@ class Reactor:
                             self.moved_accounts.append((phone, folder))
                             if self.console:
                                 self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                    return None
                 else:
                     if self.console:
                         self.console.print(f"  [green]✓ {phone}: OK[/green]")
-                    valid_accounts.append(account)
+                    return account
 
             except Exception as e:
                 log_error("check", phone, str(e))
                 if self.console:
                     self.console.print(f"  [red]✗ {phone}: {str(e)[:30]}[/red]")
+                return None
 
             finally:
                 await client.disconnect()
 
-        return valid_accounts
+        results = await asyncio.gather(*(check_one(acc) for acc in accounts))
+        return [acc for acc in results if acc is not None]
 
     @staticmethod
     def parse_invite_hash(invite_link: str) -> Optional[str]:
@@ -333,7 +338,7 @@ class Reactor:
         if self.console:
             self.console.print(f"\n[bold]Checking {len(accounts)} accounts...[/bold]")
 
-        valid_accounts = await self.check_accounts(accounts)
+        valid_accounts = await self.check_accounts(accounts, threads)
 
         if not valid_accounts:
             if self.console:
