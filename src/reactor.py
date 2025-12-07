@@ -14,6 +14,10 @@ from telethon.errors import (
     MessageIdInvalidError,
     ChatWriteForbiddenError,
     UserBannedInChannelError,
+    InviteHashInvalidError,
+    InviteHashExpiredError,
+    ChannelsTooMuchError,
+    UsersTooMuchError,
 )
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
@@ -58,16 +62,91 @@ class Reactor:
         except Exception:
             return False
 
-    async def join_channel(self, client: BaseThon, channel_id: int, invite_hash: str = None) -> bool:
+    async def join_channel(
+        self,
+        client: BaseThon,
+        channel_id: int,
+        invite_hash: str = None,
+        phone: Optional[str] = None,
+    ) -> str:
+        phone_label = phone or getattr(client, "phone", "UNKNOWN")
+
         try:
             if invite_hash:
                 await client.client(ImportChatInviteRequest(invite_hash))
             else:
                 entity = await client.client.get_entity(channel_id)
                 await client.client(JoinChannelRequest(entity))
-            return True
-        except Exception:
-            return False
+            return "OK"
+        except FloodWaitError as e:
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: FLOOD_WAIT while joining, {e.seconds}s[/yellow]"
+                )
+            raise
+        except InviteHashInvalidError as e:
+            status = "INVITE_INVALID"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [red]✗ {phone_label}: INVITE_INVALID – invite is invalid[/red]"
+                )
+            return status
+        except InviteHashExpiredError as e:
+            status = "INVITE_EXPIRED"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [red]✗ {phone_label}: INVITE_EXPIRED – invite has expired[/red]"
+                )
+            return status
+        except ChannelsTooMuchError as e:
+            status = "CHANNELS_TOO_MUCH"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [red]✗ {phone_label}: CHANNELS_TOO_MUCH – account is in too many channels[/red]"
+                )
+            return status
+        except UsersTooMuchError as e:
+            status = "USERS_TOO_MUCH"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [red]✗ {phone_label}: USERS_TOO_MUCH – chat has reached the member limit[/red]"
+                )
+            return status
+        except UserBannedInChannelError as e:
+            status = "BANNED_IN_CHANNEL"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: BANNED_IN_CHANNEL – account is banned in this channel[/yellow]"
+                )
+            return status
+        except ChannelPrivateError as e:
+            status = "CHANNEL_PRIVATE"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: CHANNEL_PRIVATE – channel is not accessible[/yellow]"
+                )
+            return status
+        except Exception as e:
+            status = "JOIN_ERROR"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: JOIN_ERROR – {msg[:120]}[/yellow]"
+                )
+            return status
 
     async def send_reaction(
         self,
@@ -77,6 +156,7 @@ class Reactor:
         reaction: str
     ) -> bool:
         try:
+            phone_label = getattr(client, "phone", "UNKNOWN")
             entity = await client.client.get_entity(channel_id)
             await client.client(SendReactionRequest(
                 peer=entity,
@@ -133,11 +213,27 @@ class Reactor:
 
                 is_subscribed = await self.check_subscription(client, actual_channel_id)
                 if not is_subscribed:
-                    joined = await self.join_channel(client, actual_channel_id, invite_hash)
-                    if not joined:
-                        log_error("reaction", phone, "CANT_JOIN")
-                        return ReactionResult(phone, False, "CANT_JOIN")
+                    join_status = await self.join_channel(client, actual_channel_id, invite_hash, phone)
+                    if join_status != "OK":
+                        log_error("reaction", phone, join_status)
+                        if self.console:
+                            human = {
+                                "INVITE_INVALID": "invite is invalid",
+                                "INVITE_EXPIRED": "invite has expired",
+                                "BANNED_IN_CHANNEL": "account is banned in this channel",
+                                "CHANNELS_TOO_MUCH": "account is already in too many channels",
+                                "USERS_TOO_MUCH": "chat has reached the member limit",
+                                "CHANNEL_PRIVATE": "channel is not accessible for this account",
+                            }.get(join_status, "failed to join the channel")
+                            self.console.print(
+                                f"  [red]✗ {phone}: {join_status} – {human}[/red]"
+                            )
+                        return ReactionResult(phone, False, join_status)
                     log_info(f"JOIN | {phone} | channel={actual_channel_id}")
+                    if self.console:
+                        self.console.print(
+                            f"  [green]✓ {phone}: JOIN | channel={actual_channel_id}[/green]"
+                        )
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
                 await self.send_reaction(client, actual_channel_id, message_id, reaction)
