@@ -142,7 +142,7 @@ class Reactor:
             log_error("join", phone_label, msg)
             if self.console:
                 self.console.print(
-                    f"  [yellow]⚠ {phone_label}: INVITE_REQUEST_SENT – join request sent, waiting for approval[/yellow]"
+                    f"  [yellow]⚠ {phone_label}: INVITE_REQUEST_SENT – join request sent, waiting for admin approval[/yellow]"
                 )
             return status
         except UserBannedInChannelError as e:
