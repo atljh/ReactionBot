@@ -23,9 +23,10 @@
   --reaction thumbsup     👍
   --reaction thumbsdown   👎
   --reaction heart        ❤️
-  --reaction fire         🔥
+  --reaction fire          🔥
   --reaction party        🎉
   --reaction hundred      💯
+  --reaction angry        🤬
   --reaction cry          😢
   --reaction clap         👏
   --reaction think        🤔

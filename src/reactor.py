@@ -18,6 +18,7 @@ from telethon.errors import (
     InviteHashExpiredError,
     ChannelsTooMuchError,
     UsersTooMuchError,
+    InviteRequestSentError,
 )
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
@@ -135,6 +136,15 @@ class Reactor:
                     f"  [red]✗ {phone_label}: USERS_TOO_MUCH – chat has reached the member limit[/red]"
                 )
             return status
+        except InviteRequestSentError as e:
+            status = "INVITE_REQUEST_SENT"
+            msg = f"{status}: {type(e).__name__}: {str(e)}"
+            log_error("join", phone_label, msg)
+            if self.console:
+                self.console.print(
+                    f"  [yellow]⚠ {phone_label}: INVITE_REQUEST_SENT – join request sent, waiting for approval[/yellow]"
+                )
+            return status
         except UserBannedInChannelError as e:
             status = "BANNED_IN_CHANNEL"
             msg = f"{status}: {type(e).__name__}: {str(e)}"
@@ -245,6 +255,7 @@ class Reactor:
                                 "CHANNELS_TOO_MUCH": "account is already in too many channels",
                                 "USERS_TOO_MUCH": "chat has reached the member limit",
                                 "CHANNEL_PRIVATE": "channel is not accessible for this account",
+                                "INVITE_REQUEST_SENT": "join request sent; waiting for admin approval",
                             }.get(join_status, "failed to join the channel")
                             self.console.print(
                                 f"  [red]✗ {phone}: {join_status} – {human}[/red]"

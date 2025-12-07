@@ -64,7 +64,14 @@ class Settings:
 
     @property
     def reactions(self) -> Dict[str, str]:
-        default = {"thumbsup": "👍", "heart": "❤️", "fire": "🔥", "clap": "👏", "party": "🎉"}
+        default = {
+            "thumbsup": "👍",
+            "heart": "❤️",
+            "fire": "🔥",
+            "clap": "👏",
+            "party": "🎉",
+            "angry": "🤬",
+        }
         return self._config.get("reactions", default)
 
     def get_random_reaction(self) -> str:
