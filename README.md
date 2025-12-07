@@ -22,8 +22,14 @@ cd tg_reacter
 
 # Створити віртуальне середовище
 python -m venv venv
-source venv/bin/activate  # Linux/macOS
-# venv\Scripts\activate   # Windows
+
+# Активувати віртуальне середовище
+# Linux/macOS (bash/zsh)
+source venv/bin/activate
+# Windows (PowerShell)
+.\\venv\\Scripts\\Activate.ps1
+# Windows (cmd.exe)
+venv\\Scripts\\activate.bat
 
 # Встановити залежності
 pip install -r requirements.txt
