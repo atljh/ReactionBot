@@ -13,6 +13,7 @@ from telethon.errors import (
     MsgIdInvalidError,
     MessageIdInvalidError,
     ChatWriteForbiddenError,
+    UserBannedInChannelError,
 )
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
@@ -164,11 +165,26 @@ class Reactor:
                 return ReactionResult(phone, False, error_msg)
 
             except ChannelPrivateError:
-                await self.db.update_subscription(account["id"], channel_id, False)
+                # Channel is not accessible for this account (not subscribed or revoked access)
+                await self.db.update_subscription(account["id"], actual_channel_id, False)
                 log_error("reaction", phone, "CHANNEL_PRIVATE")
                 if self.console:
                     self.console.print(f"  [yellow]⚠ {phone}: CHANNEL_PRIVATE[/yellow]")
                 return ReactionResult(phone, False, "CHANNEL_PRIVATE")
+
+            except UserBannedInChannelError:
+                # Account is banned specifically in this channel/group, but in general it's alive
+                log_error("reaction", phone, "BANNED_IN_CHANNEL")
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: BANNED_IN_CHANNEL[/yellow]")
+                return ReactionResult(phone, False, "BANNED_IN_CHANNEL")
+
+            except ChatWriteForbiddenError:
+                # No rights to write in this chat
+                log_error("reaction", phone, "CHAT_WRITE_FORBIDDEN")
+                if self.console:
+                    self.console.print(f"  [yellow]⚠ {phone}: CHAT_WRITE_FORBIDDEN[/yellow]")
+                return ReactionResult(phone, False, "CHAT_WRITE_FORBIDDEN")
 
             except ReactionInvalidError:
                 log_error("reaction", phone, "REACTION_INVALID")
