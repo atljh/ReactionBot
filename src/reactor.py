@@ -29,10 +29,14 @@ from .utils import log_error, log_info, log_reaction, move_account_to_status_fol
 
 
 class ReactionResult:
-    def __init__(self, phone: str, success: bool, error: Optional[str] = None):
+    def __init__(self, phone: str, success: bool, error: Optional[str] = None,
+                 should_move: bool = False, session_file: Path = None, json_file: Path = None):
         self.phone = phone
         self.success = success
         self.error = error
+        self.should_move = should_move
+        self.session_file = session_file
+        self.json_file = json_file
 
 
 class Reactor:
@@ -212,9 +216,11 @@ class Reactor:
         post_link: str,
         parsed: ParsedLink,
         semaphore: asyncio.Semaphore,
-        invite_hash: str = None
+        invite_hash: str = None,
+        progress = None
     ) -> ReactionResult:
         phone = account["phone"]
+        console = progress.console if progress else self.console
 
         async with semaphore:
             session_file = Path(account["session_file"]) if account.get("session_file") else None
@@ -247,7 +253,7 @@ class Reactor:
                     )
                     if join_status != "OK":
                         log_error("reaction", phone, join_status)
-                        if self.console:
+                        if console:
                             human = {
                                 "INVITE_INVALID": "invite is invalid",
                                 "INVITE_EXPIRED": "invite has expired",
@@ -257,13 +263,13 @@ class Reactor:
                                 "CHANNEL_PRIVATE": "channel is not accessible for this account",
                                 "INVITE_REQUEST_SENT": "join request sent; waiting for admin approval",
                             }.get(join_status, "failed to join the channel")
-                            self.console.print(
+                            console.print(
                                 f"  [red]✗ {phone}: {join_status} – {human}[/red]"
                             )
                         return ReactionResult(phone, False, join_status)
                     log_info(f"JOIN | {phone} | channel={actual_channel_id}")
-                    if self.console:
-                        self.console.print(
+                    if console:
+                        console.print(
                             f"  [green]✓ {phone}: JOIN | channel={actual_channel_id}[/green]"
                         )
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
@@ -288,42 +294,42 @@ class Reactor:
             except FloodWaitError as e:
                 error_msg = f"FLOOD:{e.seconds}s"
                 log_error("reaction", phone, error_msg)
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: {error_msg}[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: {error_msg}[/yellow]")
                 return ReactionResult(phone, False, error_msg)
 
             except ChannelPrivateError:
                 # Channel is not accessible for this account (not subscribed or revoked access)
                 await self.db.update_subscription(account["id"], actual_channel_id, False)
                 log_error("reaction", phone, "CHANNEL_PRIVATE")
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: CHANNEL_PRIVATE[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: CHANNEL_PRIVATE[/yellow]")
                 return ReactionResult(phone, False, "CHANNEL_PRIVATE")
 
             except UserBannedInChannelError:
                 # Account is banned specifically in this channel/group, but in general it's alive
                 log_error("reaction", phone, "BANNED_IN_CHANNEL")
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: BANNED_IN_CHANNEL[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: BANNED_IN_CHANNEL[/yellow]")
                 return ReactionResult(phone, False, "BANNED_IN_CHANNEL")
 
             except ChatWriteForbiddenError:
                 # No rights to write in this chat
                 log_error("reaction", phone, "CHAT_WRITE_FORBIDDEN")
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: CHAT_WRITE_FORBIDDEN[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: CHAT_WRITE_FORBIDDEN[/yellow]")
                 return ReactionResult(phone, False, "CHAT_WRITE_FORBIDDEN")
 
             except ReactionInvalidError:
                 log_error("reaction", phone, "REACTION_INVALID")
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: REACTION_INVALID[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: REACTION_INVALID[/yellow]")
                 return ReactionResult(phone, False, "REACTION_INVALID")
 
             except (MsgIdInvalidError, MessageIdInvalidError):
                 log_error("reaction", phone, "MSG_ID_INVALID")
-                if self.console:
-                    self.console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
+                if console:
+                    console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
                 return ReactionResult(phone, False, "MSG_ID_INVALID")
 
             except Exception as e:
@@ -332,8 +338,8 @@ class Reactor:
 
                 if "message" in error_lower and "invalid" in error_lower:
                     log_error("reaction", phone, "MSG_ID_INVALID")
-                    if self.console:
-                        self.console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
+                    if console:
+                        console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
                     return ReactionResult(phone, False, "MSG_ID_INVALID")
 
                 log_error("reaction", phone, error_msg)
@@ -342,25 +348,13 @@ class Reactor:
 
                 if is_ban:
                     await self.db.set_account_active(account["id"], False)
-                    if self.console:
-                        self.console.print(f"  [red]✗ {phone}: {error_msg[:40]}[/red]")
-
-                    if self.sessions_dir:
-                        status = "BANNED" if "banned" in error_lower else "SPAM" if "spam" in error_lower else "RESTRICTED"
-                        moved = move_account_to_status_folder(
-                            session_file, json_file, status,
-                            self.sessions_dir, self.tdatas_dir
-                        )
-                        if moved:
-                            folder = get_status_folder(status)
-                            self.moved_accounts.append((phone, folder))
-                            if self.console:
-                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                    if console:
+                        console.print(f"  [red]✗ {phone}: {error_msg[:40]}[/red]")
                 else:
-                    if self.console:
-                        self.console.print(f"  [yellow]⚠ {phone}: {error_msg[:40]}[/yellow]")
+                    if console:
+                        console.print(f"  [yellow]⚠ {phone}: {error_msg[:40]}[/yellow]")
 
-                return ReactionResult(phone, False, error_msg[:50])
+                return ReactionResult(phone, False, error_msg[:50], is_ban, session_file, json_file)
 
             finally:
                 await client.disconnect()
@@ -380,6 +374,8 @@ class Reactor:
                 json_data = {}
 
             client = BaseThon(session_file=session_file, json_data=json_data)
+            should_move = False
+            move_status = None
 
             try:
                 async with semaphore:
@@ -393,15 +389,9 @@ class Reactor:
                         self.console.print(f"  [red]✗ {phone}: {check_result}[/red]")
 
                     if self.sessions_dir and get_status_folder(check_result):
-                        moved = move_account_to_status_folder(
-                            session_file, json_file, check_result,
-                            self.sessions_dir, self.tdatas_dir
-                        )
-                        if moved:
-                            folder = get_status_folder(check_result)
-                            self.moved_accounts.append((phone, folder))
-                            if self.console:
-                                self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                        should_move = True
+                        move_status = check_result
+
                     return None
                 else:
                     if self.console:
@@ -415,7 +405,21 @@ class Reactor:
                 return None
 
             finally:
-                await client.disconnect()
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+                if should_move and move_status:
+                    moved = move_account_to_status_folder(
+                        session_file, json_file, move_status,
+                        self.sessions_dir, self.tdatas_dir
+                    )
+                    if moved:
+                        folder = get_status_folder(move_status)
+                        self.moved_accounts.append((phone, folder))
+                        if self.console:
+                            self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
 
         results = await asyncio.gather(*(check_one(acc) for acc in accounts))
         return [acc for acc in results if acc is not None]
@@ -489,12 +493,14 @@ class Reactor:
             BarColumn(),
             TaskProgressColumn(),
             TextColumn("[cyan]{task.completed}/{task.total}"),
+            console=self.console,
         ) as progress:
             task = progress.add_task(f"Reactions", total=len(valid_accounts))
 
             async def process_with_progress(account):
                 result = await self.process_account(
-                    account, channel_id, message_id, reaction, post_link, parsed, semaphore, invite_hash
+                    account, channel_id, message_id, reaction, post_link, parsed, semaphore, invite_hash,
+                    progress=progress
                 )
                 self.results.append(result)
                 progress.advance(task)
@@ -504,6 +510,20 @@ class Reactor:
                 *[process_with_progress(acc) for acc in valid_accounts],
                 return_exceptions=True
             )
+
+        for result in self.results:
+            if result.should_move and result.session_file and self.sessions_dir:
+                error_lower = (result.error or "").lower()
+                status = "BANNED" if "banned" in error_lower else "SPAM" if "spam" in error_lower else "RESTRICTED"
+                moved = move_account_to_status_folder(
+                    result.session_file, result.json_file, status,
+                    self.sessions_dir, self.tdatas_dir
+                )
+                if moved:
+                    folder = get_status_folder(status)
+                    self.moved_accounts.append((result.phone, folder))
+                    if self.console:
+                        self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
 
         return self.results
 

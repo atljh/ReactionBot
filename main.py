@@ -270,131 +270,128 @@ async def main():
     db = Database(settings.database)
     await db.connect()
 
-    loader = SessionLoader(settings.sessions_dir)
-    proxies = load_proxies(settings.proxies_file)
+    try:
+        loader = SessionLoader(settings.sessions_dir)
+        proxies = load_proxies(settings.proxies_file)
 
-    if proxies:
-        console.print(f"[dim]Loaded {len(proxies)} proxies[/dim]")
+        if proxies:
+            console.print(f"[dim]Loaded {len(proxies)} proxies[/dim]")
 
-    if not args.no_convert:
-        await auto_convert_tdata(settings, db, proxies)
+        if not args.no_convert:
+            await auto_convert_tdata(settings, db, proxies)
 
-    if args.sync:
-        synced = await sync_sessions(db, loader, proxies)
-        console.print(f"[green]Sync completed! Added: {synced}[/green]")
+        if args.sync:
+            synced = await sync_sessions(db, loader, proxies)
+            console.print(f"[green]Sync completed! Added: {synced}[/green]")
+            return
+
+        if args.stats:
+            accounts = await db.get_all_accounts(active_only=False)
+
+            table = Table(title="Account Statistics")
+            table.add_column("Phone", style="cyan")
+            table.add_column("Active", style="green")
+            table.add_column("Today", style="yellow")
+            table.add_column("Proxy")
+            table.add_column("Last Used")
+
+            for acc in accounts:
+                proxy_info = "-"
+                if acc.get("proxy"):
+                    try:
+                        p = eval(acc["proxy"]) if isinstance(acc["proxy"], str) else acc["proxy"]
+                        if isinstance(p, dict):
+                            proxy_info = f"{p.get('addr', '?')}:{p.get('port', '?')}"
+                    except:
+                        proxy_info = "yes"
+
+                table.add_row(
+                    acc["phone"],
+                    "Yes" if acc["is_active"] else "No",
+                    str(acc["reactions_today"] or 0),
+                    proxy_info,
+                    str(acc["last_used"] or "Never")[:19]
+                )
+
+            console.print(table)
+            console.print(f"\nTotal: {len(accounts)} | Active: {sum(1 for a in accounts if a['is_active'])}")
+            return
+
+        if not args.link:
+            parser.print_help()
+            return
+
+        if not LinkParser.is_valid(args.link):
+            console.print(f"[red]Error: Invalid link format: {args.link}[/red]")
+            sys.exit(1)
+
+        if args.clear_history:
+            parsed = LinkParser.parse(args.link)
+            await db.clear_reactions(parsed.channel_id, parsed.message_id)
+            console.print(f"[green]Cleared reaction history for post[/green]")
+            return
+
+        reaction_emoji = settings.get_reaction_emoji(args.reaction)
+        delay_range = parse_delay(args.delay)
+
+        log_info(f"START | link={args.link} | reaction={reaction_emoji} | count={args.count}")
+
+        console.print(f"\n[bold]TG Reacter[/bold]")
+        console.print(f"Link: {args.link}")
+        if args.invite:
+            console.print(f"Invite: {args.invite}")
+        console.print(f"Reaction: {reaction_emoji}")
+        console.print(f"Count: {args.count}")
+        console.print(f"Threads: {args.threads}")
+        console.print(f"Delay: {delay_range[0]}-{delay_range[1]}s")
+        if args.dry_run:
+            console.print("[yellow]DRY RUN MODE[/yellow]")
+        console.print()
+
+        await sync_sessions(db, loader, proxies)
+
+        reactor = Reactor(
+            database=db,
+            delay_range=delay_range,
+            max_reactions_per_day=settings.max_reactions_per_day,
+            sessions_dir=settings.sessions_dir,
+            tdatas_dir=settings.tdatas_dir,
+            console=console
+        )
+
+        results = await reactor.run(
+            post_link=args.link,
+            reaction=reaction_emoji,
+            count=args.count,
+            threads=args.threads,
+            dry_run=args.dry_run,
+            invite_link=args.invite
+        )
+
+        stats = reactor.get_stats()
+
+        log_info(f"END | success={stats['success']} | failed={stats['failed']} | total={stats['total']}")
+
+        console.print()
+        console.print(f"[green]Success: {stats['success']}[/green]")
+        console.print(f"[red]Failed: {stats['failed']}[/red]")
+
+        if reactor.moved_accounts:
+            console.print(f"\n[yellow]Moved accounts: {len(reactor.moved_accounts)}[/yellow]")
+            for phone, folder in reactor.moved_accounts:
+                console.print(f"  - {phone} -> sessions_{folder}/")
+
+        if stats['errors']:
+            console.print("\nErrors:")
+            for error, count in stats['errors'].items():
+                console.print(f"  - {error}: {count}")
+
+        for r in results:
+            if not r.success and r.phone not in [p for p, _ in reactor.moved_accounts]:
+                console.print(f"  [dim]{r.phone}: {r.error}[/dim]")
+
+    finally:
         await db.close()
-        return
-
-    if args.stats:
-        accounts = await db.get_all_accounts(active_only=False)
-
-        table = Table(title="Account Statistics")
-        table.add_column("Phone", style="cyan")
-        table.add_column("Active", style="green")
-        table.add_column("Today", style="yellow")
-        table.add_column("Proxy")
-        table.add_column("Last Used")
-
-        for acc in accounts:
-            proxy_info = "-"
-            if acc.get("proxy"):
-                try:
-                    p = eval(acc["proxy"]) if isinstance(acc["proxy"], str) else acc["proxy"]
-                    if isinstance(p, dict):
-                        proxy_info = f"{p.get('addr', '?')}:{p.get('port', '?')}"
-                except:
-                    proxy_info = "yes"
-
-            table.add_row(
-                acc["phone"],
-                "Yes" if acc["is_active"] else "No",
-                str(acc["reactions_today"] or 0),
-                proxy_info,
-                str(acc["last_used"] or "Never")[:19]
-            )
-
-        console.print(table)
-        console.print(f"\nTotal: {len(accounts)} | Active: {sum(1 for a in accounts if a['is_active'])}")
-        await db.close()
-        return
-
-    if not args.link:
-        parser.print_help()
-        await db.close()
-        return
-
-    if not LinkParser.is_valid(args.link):
-        console.print(f"[red]Error: Invalid link format: {args.link}[/red]")
-        await db.close()
-        sys.exit(1)
-
-    if args.clear_history:
-        parsed = LinkParser.parse(args.link)
-        await db.clear_reactions(parsed.channel_id, parsed.message_id)
-        console.print(f"[green]Cleared reaction history for post[/green]")
-        await db.close()
-        return
-
-    reaction_emoji = settings.get_reaction_emoji(args.reaction)
-    delay_range = parse_delay(args.delay)
-
-    log_info(f"START | link={args.link} | reaction={reaction_emoji} | count={args.count}")
-
-    console.print(f"\n[bold]TG Reacter[/bold]")
-    console.print(f"Link: {args.link}")
-    if args.invite:
-        console.print(f"Invite: {args.invite}")
-    console.print(f"Reaction: {reaction_emoji}")
-    console.print(f"Count: {args.count}")
-    console.print(f"Threads: {args.threads}")
-    console.print(f"Delay: {delay_range[0]}-{delay_range[1]}s")
-    if args.dry_run:
-        console.print("[yellow]DRY RUN MODE[/yellow]")
-    console.print()
-
-    await sync_sessions(db, loader, proxies)
-
-    reactor = Reactor(
-        database=db,
-        delay_range=delay_range,
-        max_reactions_per_day=settings.max_reactions_per_day,
-        sessions_dir=settings.sessions_dir,
-        tdatas_dir=settings.tdatas_dir,
-        console=console
-    )
-
-    results = await reactor.run(
-        post_link=args.link,
-        reaction=reaction_emoji,
-        count=args.count,
-        threads=args.threads,
-        dry_run=args.dry_run,
-        invite_link=args.invite
-    )
-
-    stats = reactor.get_stats()
-
-    log_info(f"END | success={stats['success']} | failed={stats['failed']} | total={stats['total']}")
-
-    console.print()
-    console.print(f"[green]Success: {stats['success']}[/green]")
-    console.print(f"[red]Failed: {stats['failed']}[/red]")
-
-    if reactor.moved_accounts:
-        console.print(f"\n[yellow]Moved accounts: {len(reactor.moved_accounts)}[/yellow]")
-        for phone, folder in reactor.moved_accounts:
-            console.print(f"  - {phone} -> sessions_{folder}/")
-
-    if stats['errors']:
-        console.print("\nErrors:")
-        for error, count in stats['errors'].items():
-            console.print(f"  - {error}: {count}")
-
-    for r in results:
-        if not r.success and r.phone not in [p for p, _ in reactor.moved_accounts]:
-            console.print(f"  [dim]{r.phone}: {r.error}[/dim]")
-
-    await db.close()
 
 
 if __name__ == "__main__":
