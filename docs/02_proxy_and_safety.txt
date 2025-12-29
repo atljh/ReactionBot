@@ -136,3 +136,33 @@ SessionRevokedError
 
 Перевірка здоров'я:
   python checker.py --all
+
+
+УПРАВЛІННЯ ПРОКСІ (proxy_manager.py)
+------------------------------------
+
+Скрипт для управління проксі акаунтів.
+
+Переглянути всі акаунти та їх проксі:
+  python proxy_manager.py --list
+
+Подивитися проксі конкретного акаунта:
+  python proxy_manager.py --show 14474652632
+
+Встановити/змінити проксі для акаунта:
+  python proxy_manager.py --set 14474652632 socks5://user:pass@1.2.3.4:5555
+
+Видалити проксі у акаунта:
+  python proxy_manager.py --remove 14474652632
+
+Призначити проксі з proxies.txt акаунтам БЕЗ проксі:
+  python proxy_manager.py --assign
+
+Замінити проксі у ВСІХ акаунтів з proxies.txt:
+  python proxy_manager.py --replace-all
+
+Примітки:
+  - --assign призначає проксі тільки акаунтам без проксі
+  - --replace-all замінює проксі у всіх акаунтів (з підтвердженням)
+  - Якщо акаунтів більше ніж проксі, проксі використовуються повторно
+  - Після зміни проксі рекомендується запустити python main.py --sync
