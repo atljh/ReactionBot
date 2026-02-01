@@ -216,8 +216,8 @@ async def main():
     parser.add_argument(
         "--threads", "-t",
         type=int,
-        default=5,
-        help="Number of parallel threads (default: 5)"
+        default=10,
+        help="Number of parallel threads (default: 10)"
     )
     parser.add_argument(
         "--delay", "-d",

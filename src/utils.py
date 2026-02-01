@@ -175,6 +175,7 @@ STATUS_FOLDERS = {
     "BANNED": "banned",
     "SESSION_REVOKED": "revoked",
     "RESTRICTED": "restricted",
+    "SEARCH_RESTRICTED": "search_restricted",
     "SPAM": "spam",
     "FROZEN": "frozen",
     "UNAUTHORIZED": "unauthorized",

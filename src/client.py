@@ -9,6 +9,8 @@ from telethon.errors import (
     SessionRevokedError,
     UserRestrictedError,
     PhoneNumberBannedError,
+    UsernameNotOccupiedError,
+    UsernameInvalidError,
 )
 from .utils import proxy_to_telethon
 
@@ -105,12 +107,34 @@ class BaseThon:
         if self._client:
             await self._client.disconnect()
 
-    async def check(self) -> str:
+    async def check(self, test_entity: str = "telegram") -> str:
+        """
+        Check account status.
+
+        Args:
+            test_entity: Username to test get_entity() capability.
+                        Default "telegram" (official Telegram account).
+        """
         try:
             await self.client.connect()
             if not await self.client.is_user_authorized():
                 return "UNAUTHORIZED"
             self._me = await self.client.get_me()
+
+            # Test if account can search for other users/channels
+            # Restricted accounts fail here with "No user has X as username"
+            if test_entity:
+                try:
+                    await self.client.get_entity(test_entity)
+                except (UsernameNotOccupiedError, UsernameInvalidError):
+                    # Entity doesn't exist - not an account problem
+                    pass
+                except Exception as e:
+                    error_str = str(e).lower()
+                    if "no user has" in error_str or "username" in error_str:
+                        return "SEARCH_RESTRICTED"
+                    raise
+
             return "OK"
         except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
             return "BANNED"
@@ -130,6 +154,8 @@ class BaseThon:
                 return "FROZEN"
             if "restrict" in error_str:
                 return "RESTRICTED"
+            if "no user has" in error_str:
+                return "SEARCH_RESTRICTED"
             return f"ERROR:{str(e)[:50]}"
 
     async def get_me(self):

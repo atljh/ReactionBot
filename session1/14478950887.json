@@ -1,0 +1,22 @@
+{
+  "app_id": 2040,
+  "app_hash": "b18441a1ff607e10a989891a5462e627",
+  "phone": "14478950887",
+  "telegram_id": 8026689606,
+  "username": null,
+  "first_name": "Thomas",
+  "last_name": "Clark",
+  "string_session": "1AZWarzUBu2KzU4wsP0LuIcOqHhnElrPWbNcl1dM1W1hIhXaOLV73ucPp9UhFAQ3iqtvCqI2zGmnSzOPcM4VBcNbL680vnjoMVKkk5lORsKK-qAsFqFJw1naeKGeBtvABFmOjktAYcE46FONeBawOjYtwMMWg6E187tvleqIBU4Y3_HicVQnSxPwGmMbwr7r7vBv2WvRfEhKGdgo6NuoXVmESpZ50C8jJvDlz4PkpO-xJontxJero7FOlI7AluXev5rEJGwfwN-ChcHIXzg-DzT31BikzQtoUgrBWrC_3D9xc4XiofaJ5q2D59Q20eOdq5OUuw78F1iBx8tpOfPjeHjDTxF7MbFU=",
+  "device": "Desktop",
+  "sdk": "Windows 10",
+  "app_version": "4.8.0",
+  "lang_code": "en",
+  "system_lang_code": "en-US",
+  "proxy": {
+    "proxy_type": "socks5",
+    "addr": "62.244.32.87",
+    "port": 2832,
+    "username": "58886",
+    "password": "WjoR2Zl8"
+  }
+}

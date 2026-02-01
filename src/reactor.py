@@ -207,6 +207,21 @@ class Reactor:
         entity = await client.client.get_entity(parsed.username)
         return entity.id
 
+    async def check_account_search_ability(self, client: BaseThon) -> bool:
+        """
+        Check if account can search for users/channels by testing with @telegram.
+        Returns True if account can search, False if SEARCH_RESTRICTED.
+        """
+        try:
+            await client.client.get_entity("telegram")
+            return True
+        except Exception as e:
+            error_str = str(e).lower()
+            if "no user has" in error_str:
+                return False
+            # Other errors (flood, connection) - assume account is OK
+            return True
+
     async def process_account(
         self,
         account: Dict[str, Any],
@@ -237,10 +252,11 @@ class Reactor:
             try:
                 await client.connect()
 
-                if parsed.channel_id == 0:
-                    actual_channel_id = await self.resolve_channel(client, parsed)
-                else:
+                # Use pre-resolved channel_id if available, otherwise resolve
+                if channel_id != 0:
                     actual_channel_id = channel_id
+                else:
+                    actual_channel_id = await self.resolve_channel(client, parsed)
 
                 is_subscribed = await self.check_subscription(client, actual_channel_id)
                 if not is_subscribed:
@@ -342,19 +358,76 @@ class Reactor:
                         console.print(f"  [yellow]⚠ {phone}: MSG_ID_INVALID[/yellow]")
                     return ReactionResult(phone, False, "MSG_ID_INVALID")
 
+                # "No user has X as username" error - check if it's account problem or channel problem
+                if "no user has" in error_lower and "username" in error_lower:
+                    # Test if account can search at all by checking @telegram
+                    can_search = await self.check_account_search_ability(client)
+
+                    if not can_search:
+                        # Account is search-restricted (frozen/limited)
+                        log_error("reaction", phone, "SEARCH_RESTRICTED")
+                        await self.db.set_account_active(account["id"], False)
+                        if console:
+                            console.print(f"  [red]✗ {phone}: SEARCH_RESTRICTED – account cannot search users/channels[/red]")
+
+                        # Move session immediately
+                        if self.sessions_dir and session_file:
+                            moved = move_account_to_status_folder(
+                                session_file, json_file, "SEARCH_RESTRICTED",
+                                self.sessions_dir, self.tdatas_dir
+                            )
+                            if moved:
+                                folder = get_status_folder("SEARCH_RESTRICTED")
+                                self.moved_accounts.append((phone, folder))
+                                if console:
+                                    console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+
+                        return ReactionResult(phone, False, "SEARCH_RESTRICTED")
+                    else:
+                        # Account is OK, channel/username doesn't exist
+                        log_error("reaction", phone, f"CHANNEL_NOT_FOUND: {error_msg[:50]}")
+                        if console:
+                            console.print(f"  [yellow]⚠ {phone}: CHANNEL_NOT_FOUND – channel/username does not exist[/yellow]")
+                        return ReactionResult(phone, False, "CHANNEL_NOT_FOUND")
+
                 log_error("reaction", phone, error_msg)
 
-                is_ban = any(x in error_lower for x in ["banned", "deactivated", "spam", "restrict"])
+                # Temporary limits - don't move, just warn
+                if "spam" in error_lower or "flood" in error_lower:
+                    if console:
+                        console.print(f"  [yellow]⚠ {phone}: Temporary limit – {error_msg[:40]}[/yellow]")
+                    return ReactionResult(phone, False, error_msg[:50])
+
+                # Permanent bans - move account
+                is_ban = any(x in error_lower for x in ["banned", "deactivated", "restrict"])
 
                 if is_ban:
                     await self.db.set_account_active(account["id"], False)
                     if console:
                         console.print(f"  [red]✗ {phone}: {error_msg[:40]}[/red]")
+
+                    # Move session immediately
+                    if self.sessions_dir and session_file:
+                        if "banned" in error_lower or "deactivated" in error_lower:
+                            status = "BANNED"
+                        else:
+                            status = "RESTRICTED"
+                        moved = move_account_to_status_folder(
+                            session_file, json_file, status,
+                            self.sessions_dir, self.tdatas_dir
+                        )
+                        if moved:
+                            folder = get_status_folder(status)
+                            self.moved_accounts.append((phone, folder))
+                            if console:
+                                console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+
+                    return ReactionResult(phone, False, error_msg[:50])
                 else:
                     if console:
                         console.print(f"  [yellow]⚠ {phone}: {error_msg[:40]}[/yellow]")
 
-                return ReactionResult(phone, False, error_msg[:50], is_ban, session_file, json_file)
+                return ReactionResult(phone, False, error_msg[:50])
 
             finally:
                 await client.disconnect()
@@ -440,7 +513,7 @@ class Reactor:
         post_link: str,
         reaction: str,
         count: int,
-        threads: int = 5,
+        threads: int = 10,
         dry_run: bool = False,
         invite_link: str = None
     ) -> List[ReactionResult]:
@@ -510,20 +583,6 @@ class Reactor:
                 *[process_with_progress(acc) for acc in valid_accounts],
                 return_exceptions=True
             )
-
-        for result in self.results:
-            if result.should_move and result.session_file and self.sessions_dir:
-                error_lower = (result.error or "").lower()
-                status = "BANNED" if "banned" in error_lower else "SPAM" if "spam" in error_lower else "RESTRICTED"
-                moved = move_account_to_status_folder(
-                    result.session_file, result.json_file, status,
-                    self.sessions_dir, self.tdatas_dir
-                )
-                if moved:
-                    folder = get_status_folder(status)
-                    self.moved_accounts.append((result.phone, folder))
-                    if self.console:
-                        self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
 
         return self.results
 

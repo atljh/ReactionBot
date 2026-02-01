@@ -50,8 +50,8 @@ async def main():
     parser.add_argument(
         "--threads", "-t",
         type=int,
-        default=3,
-        help="Number of parallel checks (default: 3)"
+        default=10,
+        help="Number of parallel checks (default: 10)"
     )
     parser.add_argument(
         "--config",
