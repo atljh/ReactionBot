@@ -98,84 +98,25 @@ class Reactor:
                 entity = await client.client.get_entity(channel_id)
                 await client.client(JoinChannelRequest(entity))
             return "OK"
-        except FloodWaitError as e:
-            if self.console:
-                self.console.print(
-                    f"  [yellow]⚠ {phone_label}: FLOOD_WAIT while joining, {e.seconds}s[/yellow]"
-                )
+        except FloodWaitError:
             raise
-        except InviteHashInvalidError as e:
-            status = "INVITE_INVALID"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [red]✗ {phone_label}: INVITE_INVALID – invite is invalid[/red]"
-                )
-            return status
-        except InviteHashExpiredError as e:
-            status = "INVITE_EXPIRED"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [red]✗ {phone_label}: INVITE_EXPIRED – invite has expired[/red]"
-                )
-            return status
-        except ChannelsTooMuchError as e:
-            status = "CHANNELS_TOO_MUCH"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [red]✗ {phone_label}: CHANNELS_TOO_MUCH – account is in too many channels[/red]"
-                )
-            return status
-        except UsersTooMuchError as e:
-            status = "USERS_TOO_MUCH"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [red]✗ {phone_label}: USERS_TOO_MUCH – chat has reached the member limit[/red]"
-                )
-            return status
-        except InviteRequestSentError as e:
-            status = "INVITE_REQUEST_SENT"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [yellow]⚠ {phone_label}: INVITE_REQUEST_SENT – join request sent, waiting for admin approval[/yellow]"
-                )
-            return status
-        except UserBannedInChannelError as e:
-            status = "BANNED_IN_CHANNEL"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [yellow]⚠ {phone_label}: BANNED_IN_CHANNEL – account is banned in this channel[/yellow]"
-                )
-            return status
-        except ChannelPrivateError as e:
-            status = "CHANNEL_PRIVATE"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [yellow]⚠ {phone_label}: CHANNEL_PRIVATE – channel is not accessible[/yellow]"
-                )
-            return status
+        except InviteHashInvalidError:
+            return "INVITE_INVALID"
+        except InviteHashExpiredError:
+            return "INVITE_EXPIRED"
+        except ChannelsTooMuchError:
+            return "CHANNELS_TOO_MUCH"
+        except UsersTooMuchError:
+            return "USERS_TOO_MUCH"
+        except InviteRequestSentError:
+            return "INVITE_REQUEST_SENT"
+        except UserBannedInChannelError:
+            return "BANNED_IN_CHANNEL"
+        except ChannelPrivateError:
+            return "CHANNEL_PRIVATE"
         except Exception as e:
-            status = "JOIN_ERROR"
-            msg = f"{status}: {type(e).__name__}: {str(e)}"
-            log_error("join", phone_label, msg)
-            if self.console:
-                self.console.print(
-                    f"  [yellow]⚠ {phone_label}: JOIN_ERROR – {msg[:120]}[/yellow]"
-                )
-            return status
+            log_error("join", phone_label, str(e))
+            return "JOIN_ERROR"
 
     async def send_reaction(
         self,
@@ -284,10 +225,6 @@ class Reactor:
                             )
                         return ReactionResult(phone, False, join_status)
                     log_info(f"JOIN | {phone} | channel={actual_channel_id}")
-                    if console:
-                        console.print(
-                            f"  [green]✓ {phone}: JOIN | channel={actual_channel_id}[/green]"
-                        )
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
                 await self.send_reaction(client, actual_channel_id, message_id, reaction)
@@ -377,10 +314,7 @@ class Reactor:
                                 self.sessions_dir, self.tdatas_dir
                             )
                             if moved:
-                                folder = get_status_folder("SEARCH_RESTRICTED")
-                                self.moved_accounts.append((phone, folder))
-                                if console:
-                                    console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                                self.moved_accounts.append((phone, "search_restricted"))
 
                         return ReactionResult(phone, False, "SEARCH_RESTRICTED")
                     else:
@@ -409,18 +343,15 @@ class Reactor:
                     # Move session immediately
                     if self.sessions_dir and session_file:
                         if "banned" in error_lower or "deactivated" in error_lower:
-                            status = "BANNED"
+                            status = "banned"
                         else:
-                            status = "RESTRICTED"
+                            status = "restricted"
                         moved = move_account_to_status_folder(
-                            session_file, json_file, status,
+                            session_file, json_file, status.upper(),
                             self.sessions_dir, self.tdatas_dir
                         )
                         if moved:
-                            folder = get_status_folder(status)
-                            self.moved_accounts.append((phone, folder))
-                            if console:
-                                console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
+                            self.moved_accounts.append((phone, status))
 
                     return ReactionResult(phone, False, error_msg[:50])
                 else:
@@ -458,23 +389,16 @@ class Reactor:
                     await self.db.set_account_active(account["id"], False)
                     log_error("check", phone, check_result)
 
-                    if self.console:
-                        self.console.print(f"  [red]✗ {phone}: {check_result}[/red]")
-
                     if self.sessions_dir and get_status_folder(check_result):
                         should_move = True
                         move_status = check_result
 
                     return None
                 else:
-                    if self.console:
-                        self.console.print(f"  [green]✓ {phone}: OK[/green]")
                     return account
 
             except Exception as e:
                 log_error("check", phone, str(e))
-                if self.console:
-                    self.console.print(f"  [red]✗ {phone}: {str(e)[:30]}[/red]")
                 return None
 
             finally:
@@ -491,8 +415,6 @@ class Reactor:
                     if moved:
                         folder = get_status_folder(move_status)
                         self.moved_accounts.append((phone, folder))
-                        if self.console:
-                            self.console.print(f"    [dim]→ moved to sessions_{folder}/[/dim]")
 
         results = await asyncio.gather(*(check_one(acc) for acc in accounts))
         return [acc for acc in results if acc is not None]
@@ -541,13 +463,20 @@ class Reactor:
             return []
 
         if self.console:
-            self.console.print(f"\n[bold]Checking {len(accounts)} accounts...[/bold]")
+            self.console.print(f"[bold]Checking {len(accounts)} accounts...[/bold]")
 
         valid_accounts = await self.check_accounts(accounts, threads)
+        invalid_count = len(accounts) - len(valid_accounts)
+
+        if self.console:
+            if invalid_count > 0:
+                self.console.print(f"[green]{len(valid_accounts)} OK[/green] | [red]{invalid_count} invalid[/red]")
+            else:
+                self.console.print(f"[green]{len(valid_accounts)} OK[/green]")
 
         if not valid_accounts:
             if self.console:
-                self.console.print("[yellow]No valid accounts after check[/yellow]")
+                self.console.print("[yellow]No valid accounts[/yellow]")
             return []
 
         if self.console:

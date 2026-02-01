@@ -372,23 +372,21 @@ async def main():
 
         log_info(f"END | success={stats['success']} | failed={stats['failed']} | total={stats['total']}")
 
+        # Summary
         console.print()
-        console.print(f"[green]Success: {stats['success']}[/green]")
-        console.print(f"[red]Failed: {stats['failed']}[/red]")
-
-        if reactor.moved_accounts:
-            console.print(f"\n[yellow]Moved accounts: {len(reactor.moved_accounts)}[/yellow]")
-            for phone, folder in reactor.moved_accounts:
-                console.print(f"  - {phone} -> sessions_{folder}/")
+        console.print(f"[bold]Results:[/bold] [green]{stats['success']} OK[/green] | [red]{stats['failed']} failed[/red]")
 
         if stats['errors']:
-            console.print("\nErrors:")
-            for error, count in stats['errors'].items():
-                console.print(f"  - {error}: {count}")
+            error_parts = [f"{err}: {cnt}" for err, cnt in stats['errors'].items()]
+            console.print(f"[dim]Errors: {', '.join(error_parts)}[/dim]")
 
-        for r in results:
-            if not r.success and r.phone not in [p for p, _ in reactor.moved_accounts]:
-                console.print(f"  [dim]{r.phone}: {r.error}[/dim]")
+        if reactor.moved_accounts:
+            # Group by folder
+            by_folder = {}
+            for phone, folder in reactor.moved_accounts:
+                by_folder.setdefault(folder, []).append(phone)
+            moved_parts = [f"{folder}: {len(phones)}" for folder, phones in by_folder.items()]
+            console.print(f"[yellow]Moved: {', '.join(moved_parts)}[/yellow]")
 
     finally:
         await db.close()
