@@ -58,23 +58,37 @@ class Reactor:
         self.results: List[ReactionResult] = []
         self.moved_accounts: List[Tuple[str, str]] = []
 
-    async def check_subscription(self, client: BaseThon, channel_id: int) -> bool:
+    async def check_subscription(self, client: BaseThon, channel: Any) -> Tuple[bool, Optional[str]]:
+        """
+        Check if account is subscribed to channel.
+        channel can be entity, channel_id, or username.
+        Returns (is_subscribed, error_if_any).
+        """
         try:
-            await client.client(GetParticipantRequest(channel_id, "me"))
-            return True
+            # If channel is an entity with access_hash, use it directly
+            # Otherwise Telethon will try to resolve it
+            await client.client(GetParticipantRequest(channel, "me"))
+            return True, None
         except UserNotParticipantError:
-            return False
-        except Exception:
-            return False
+            return False, None
+        except ChannelPrivateError:
+            return False, "CHANNEL_PRIVATE"
+        except Exception as e:
+            return False, str(e)[:50]
 
     async def join_channel(
         self,
         client: BaseThon,
-        channel_id: int,
+        channel: Any,  # Can be entity, channel_id, or will use username
         invite_hash: str = None,
         phone: Optional[str] = None,
         is_private: bool = False,
-    ) -> str:
+        username: Optional[str] = None,
+    ) -> Tuple[str, Optional[Any]]:
+        """
+        Join a channel and return (status, entity).
+        Returns entity on success for subsequent operations.
+        """
         phone_label = phone or getattr(client, "phone", "UNKNOWN")
 
         # For private /c/ links (or tg://privatepost) we cannot resolve the
@@ -89,45 +103,70 @@ class Reactor:
                 self.console.print(
                     f"  [yellow]⚠ {phone_label}: CHANNEL_PRIVATE – private link without invite; use --invite[/yellow]"
                 )
-            return status
+            return status, None
 
         try:
             if invite_hash:
                 await client.client(ImportChatInviteRequest(invite_hash))
-            else:
-                entity = await client.client.get_entity(channel_id)
+                # After joining via invite, get entity
+                if hasattr(channel, 'id'):
+                    entity = channel
+                else:
+                    entity = await client.client.get_entity(channel)
+            elif hasattr(channel, 'id'):
+                # Already have entity with access_hash - use it directly
+                entity = channel
                 await client.client(JoinChannelRequest(entity))
-            return "OK"
+            elif username:
+                # For public channels, use username directly - this properly resolves access_hash
+                entity = await client.client.get_entity(username)
+                await client.client(JoinChannelRequest(entity))
+            else:
+                entity = await client.client.get_entity(channel)
+                await client.client(JoinChannelRequest(entity))
+            return "OK", entity
         except FloodWaitError:
             raise
         except InviteHashInvalidError:
-            return "INVITE_INVALID"
+            return "INVITE_INVALID", None
         except InviteHashExpiredError:
-            return "INVITE_EXPIRED"
+            return "INVITE_EXPIRED", None
         except ChannelsTooMuchError:
-            return "CHANNELS_TOO_MUCH"
+            return "CHANNELS_TOO_MUCH", None
         except UsersTooMuchError:
-            return "USERS_TOO_MUCH"
+            return "USERS_TOO_MUCH", None
         except InviteRequestSentError:
-            return "INVITE_REQUEST_SENT"
+            return "INVITE_REQUEST_SENT", None
         except UserBannedInChannelError:
-            return "BANNED_IN_CHANNEL"
-        except ChannelPrivateError:
-            return "CHANNEL_PRIVATE"
+            return "BANNED_IN_CHANNEL", None
+        except ChannelPrivateError as e:
+            log_error("join", phone_label, f"CHANNEL_PRIVATE: {str(e)}")
+            return "CHANNEL_PRIVATE", None
         except Exception as e:
-            log_error("join", phone_label, str(e))
-            return "JOIN_ERROR"
+            error_msg = str(e)
+            log_error("join", phone_label, f"JOIN_ERROR: {error_msg}")
+            # Check for specific error patterns
+            error_lower = error_msg.lower()
+            if "private" in error_lower or "not accessible" in error_lower:
+                return "CHANNEL_PRIVATE", None
+            if "banned" in error_lower:
+                return "BANNED_IN_CHANNEL", None
+            return "JOIN_ERROR", None
 
     async def send_reaction(
         self,
         client: BaseThon,
-        channel_id: int,
+        channel: Any,  # Can be entity or channel_id
         message_id: int,
         reaction: str
     ) -> bool:
         try:
-            phone_label = getattr(client, "phone", "UNKNOWN")
-            entity = await client.client.get_entity(channel_id)
+            # If channel is already an entity, use it directly
+            # Otherwise resolve by ID
+            if hasattr(channel, 'id'):
+                entity = channel
+            else:
+                entity = await client.client.get_entity(channel)
             await client.client(SendReactionRequest(
                 peer=entity,
                 msg_id=message_id,
@@ -141,12 +180,18 @@ class Reactor:
         except Exception as e:
             raise e
 
-    async def resolve_channel(self, client: BaseThon, parsed: ParsedLink) -> int:
+    async def resolve_channel(self, client: BaseThon, parsed: ParsedLink) -> Tuple[int, Optional[Any]]:
+        """
+        Resolve channel and return (channel_id, entity).
+        For public channels, returns entity with access_hash.
+        """
         if parsed.channel_id != 0:
-            return parsed.channel_id
+            # For private channels, we only have ID
+            return parsed.channel_id, None
 
+        # For public channels, resolve by username to get proper access_hash
         entity = await client.client.get_entity(parsed.username)
-        return entity.id
+        return entity.id, entity
 
     async def check_account_search_ability(self, client: BaseThon) -> bool:
         """
@@ -193,41 +238,68 @@ class Reactor:
             try:
                 await client.connect()
 
-                # Use pre-resolved channel_id if available, otherwise resolve
+                # Resolve channel - for public channels we get entity with access_hash
+                channel_entity = None
                 if channel_id != 0:
                     actual_channel_id = channel_id
                 else:
-                    actual_channel_id = await self.resolve_channel(client, parsed)
+                    try:
+                        actual_channel_id, channel_entity = await self.resolve_channel(client, parsed)
+                    except ChannelPrivateError:
+                        log_error("resolve", phone, "CHANNEL_PRIVATE at resolve_channel")
+                        if console:
+                            console.print(f"  [red]✗ {phone}: CHANNEL_PRIVATE – cannot resolve channel[/red]")
+                        return ReactionResult(phone, False, "CHANNEL_PRIVATE")
+                    except Exception as e:
+                        log_error("resolve", phone, f"Error resolving channel: {str(e)}")
+                        if console:
+                            console.print(f"  [red]✗ {phone}: Cannot resolve channel – {str(e)[:40]}[/red]")
+                        return ReactionResult(phone, False, f"RESOLVE_ERROR:{str(e)[:30]}")
 
-                is_subscribed = await self.check_subscription(client, actual_channel_id)
+                # Use entity if available, otherwise use username for public channels
+                check_target = channel_entity or parsed.username or actual_channel_id
+                is_subscribed, sub_error = await self.check_subscription(client, check_target)
+
+                # If check_subscription returned CHANNEL_PRIVATE, try joining anyway
+                if sub_error == "CHANNEL_PRIVATE":
+                    log_error("check_sub", phone, f"CHANNEL_PRIVATE at check_subscription, will try to join")
+                    is_subscribed = False
+                elif sub_error:
+                    log_error("check_sub", phone, f"Error: {sub_error}")
+
                 if not is_subscribed:
-                    join_status = await self.join_channel(
+                    join_status, joined_entity = await self.join_channel(
                         client,
-                        actual_channel_id,
+                        channel_entity or actual_channel_id,  # Prefer entity if available
                         invite_hash,
                         phone,
                         parsed.is_private,
+                        username=parsed.username,  # Pass username for public channels
                     )
                     if join_status != "OK":
                         log_error("reaction", phone, join_status)
                         if console:
                             human = {
-                                "INVITE_INVALID": "invite is invalid",
-                                "INVITE_EXPIRED": "invite has expired",
+                                "INVITE_INVALID": "invite link is invalid",
+                                "INVITE_EXPIRED": "invite link has expired",
                                 "BANNED_IN_CHANNEL": "account is banned in this channel",
-                                "CHANNELS_TOO_MUCH": "account is already in too many channels",
-                                "USERS_TOO_MUCH": "chat has reached the member limit",
-                                "CHANNEL_PRIVATE": "channel is not accessible for this account",
-                                "INVITE_REQUEST_SENT": "join request sent; waiting for admin approval",
+                                "CHANNELS_TOO_MUCH": "account joined too many channels",
+                                "USERS_TOO_MUCH": "channel reached member limit",
+                                "CHANNEL_PRIVATE": "cannot join – account restricted or banned by channel",
+                                "INVITE_REQUEST_SENT": "join request sent, waiting for approval",
                             }.get(join_status, "failed to join the channel")
                             console.print(
-                                f"  [red]✗ {phone}: {join_status} – {human}[/red]"
+                                f"  [red]✗ {phone}: {human}[/red]"
                             )
                         return ReactionResult(phone, False, join_status)
+                    # Use entity from join_channel for subsequent operations
+                    if joined_entity:
+                        channel_entity = joined_entity
                     log_info(f"JOIN | {phone} | channel={actual_channel_id}")
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
 
-                await self.send_reaction(client, actual_channel_id, message_id, reaction)
+                # Use entity if available, otherwise fall back to ID
+                await self.send_reaction(client, channel_entity or actual_channel_id, message_id, reaction)
 
                 await self.db.log_reaction(
                     account["id"],

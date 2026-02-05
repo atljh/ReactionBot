@@ -380,6 +380,14 @@ async def main():
             error_parts = [f"{err}: {cnt}" for err, cnt in stats['errors'].items()]
             console.print(f"[dim]Errors: {', '.join(error_parts)}[/dim]")
 
+            # Show hint if all failed with CHANNEL_PRIVATE
+            channel_private_count = stats['errors'].get('CHANNEL_PRIVATE', 0)
+            if channel_private_count > 0 and channel_private_count == stats['failed']:
+                console.print()
+                console.print("[yellow]⚠ All accounts failed with CHANNEL_PRIVATE.[/yellow]")
+                console.print("[dim]This channel likely restricts these accounts (region/phone mismatch or ban).[/dim]")
+                console.print("[dim]Try a different channel or accounts with matching region.[/dim]")
+
         if reactor.moved_accounts:
             # Group by folder
             by_folder = {}
