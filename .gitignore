@@ -18,3 +18,7 @@ build/
 .mypy_cache/
 logs/
 .log
+sessions_errors/
+sessions_restricted/
+sessions_unauthorized/
+tgcrypto/
