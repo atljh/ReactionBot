@@ -17,8 +17,15 @@ async def main():
         str(session_file),
         api_id=data.get("app_id") or data.get("api_id"),
         api_hash=data.get("app_hash") or data.get("api_hash"),
+        device_model=data.get("device", "Desktop"),
+        system_version=data.get("sdk", "Windows 10"),
+        app_version=data.get("app_version", "4.8.0"),
+        lang_code=data.get("lang_code", "en"),
+        system_lang_code=data.get("system_lang_code", "en-US"),
         proxy=proxy,
-        timeout=15
+        timeout=15,
+        flood_sleep_threshold=0,
+        receive_updates=False,
     )
 
     await client.connect()

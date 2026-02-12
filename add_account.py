@@ -61,7 +61,8 @@ async def main():
         system_version="Windows 10",
         app_version="4.8.0",
         lang_code="en",
-        system_lang_code="en-US"
+        system_lang_code="en-US",
+        flood_sleep_threshold=0,
     )
 
     await client.connect()
@@ -97,7 +98,14 @@ async def main():
         str(session_file),
         settings.api_id,
         settings.api_hash,
-        proxy=proxy_tuple
+        device_model="Desktop",
+        system_version="Windows 10",
+        app_version="4.8.0",
+        lang_code="en",
+        system_lang_code="en-US",
+        proxy=proxy_tuple,
+        flood_sleep_threshold=0,
+        receive_updates=False,
     )
     await file_client.connect()
     file_client.session.set_dc(

@@ -56,9 +56,16 @@ class TDataConverter:
             StringSession(session_string),
             self.api_id,
             self.api_hash,
+            device_model="Desktop",
+            system_version="Windows 10",
+            app_version="4.8.0",
+            lang_code="en",
+            system_lang_code="en-US",
             proxy=proxy_to_telethon(proxy) if proxy else None,
-            connection_retries=3,
-            timeout=10
+            connection_retries=2,
+            timeout=10,
+            flood_sleep_threshold=0,
+            receive_updates=False,
         )
 
         try:

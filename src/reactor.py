@@ -231,12 +231,20 @@ class Reactor:
                 from .utils import json_read
                 json_data = json_read(json_file)
             else:
-                json_data = {}
+                json_data = None
+
+            if not json_data:
+                log_error("reaction", phone, f"JSON file missing or corrupt: {json_file}")
+                return ReactionResult(phone, False, "NO_JSON_DATA")
 
             client = BaseThon(session_file=session_file, json_data=json_data)
 
+            actual_channel_id = channel_id
             try:
-                await client.connect()
+                authorized = await client.connect()
+                if not authorized:
+                    log_error("reaction", phone, "NOT_AUTHORIZED at connect")
+                    return ReactionResult(phone, False, "UNAUTHORIZED")
 
                 # Resolve channel - for public channels we get entity with access_hash
                 channel_entity = None
@@ -297,6 +305,10 @@ class Reactor:
                         channel_entity = joined_entity
                     log_info(f"JOIN | {phone} | channel={actual_channel_id}")
                     await self.db.update_subscription(account["id"], actual_channel_id, True)
+
+                    # Delay after join before reacting — instant reaction after join is suspicious
+                    join_delay = random.uniform(3, 8)
+                    await asyncio.sleep(join_delay)
 
                 # Use entity if available, otherwise fall back to ID
                 await self.send_reaction(client, channel_entity or actual_channel_id, message_id, reaction)
@@ -433,7 +445,10 @@ class Reactor:
                 return ReactionResult(phone, False, error_msg[:50])
 
             finally:
-                await client.disconnect()
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
 
     async def check_accounts(self, accounts: List[Dict[str, Any]], threads: int) -> List[Dict[str, Any]]:
         semaphore = asyncio.Semaphore(max(1, threads))
@@ -447,7 +462,11 @@ class Reactor:
                 from .utils import json_read
                 json_data = json_read(json_file)
             else:
-                json_data = {}
+                json_data = None
+
+            if not json_data:
+                log_error("check", phone, f"JSON file missing or corrupt: {json_file}")
+                return None
 
             client = BaseThon(session_file=session_file, json_data=json_data)
             should_move = False
@@ -455,7 +474,7 @@ class Reactor:
 
             try:
                 async with semaphore:
-                    check_result = await client.check()
+                    check_result = await client.check(test_entity=None)
 
                 if check_result != "OK":
                     is_temporary = check_result.startswith("FLOOD") or check_result == "CONNECTION_ERROR"

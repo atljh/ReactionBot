@@ -21,7 +21,7 @@ class BaseThon:
         self,
         session_file: Optional[Path] = None,
         json_data: Optional[Dict[str, Any]] = None,
-        retries: int = 5,
+        retries: int = 2,
         timeout: int = 10
     ):
         self._session_file = session_file
@@ -97,20 +97,18 @@ class BaseThon:
             connection_retries=self._retries,
             request_retries=self._retries,
             proxy=proxy_to_telethon(self.proxy),
-            timeout=self._timeout
+            timeout=self._timeout,
+            flood_sleep_threshold=0,
+            receive_updates=False,
         )
 
     async def connect(self) -> bool:
+        if not self.app_id or not self.app_hash:
+            raise ValueError(f"Missing API credentials: app_id={self.app_id}, app_hash={bool(self.app_hash)}")
+
         await self.client.connect()
-        # Use get_me() instead of is_user_authorized() to avoid
-        # swallowing FloodWaitError (which is an RPCError)
-        try:
-            self._me = await self.client.get_me()
-            return self._me is not None
-        except FloodWaitError:
-            raise
-        except Exception:
-            return False
+        self._me = await self.client.get_me()
+        return self._me is not None
 
     async def disconnect(self):
         if self._client:
@@ -126,6 +124,9 @@ class BaseThon:
         mistakenly marked as UNAUTHORIZED.
         """
         try:
+            if not self.app_id or not self.app_hash:
+                return f"ERROR:missing api_id={self.app_id}"
+
             await self.client.connect()
 
             # get_me() properly raises FloodWaitError, AuthKeyUnregistered, etc.
