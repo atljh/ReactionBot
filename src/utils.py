@@ -179,7 +179,7 @@ STATUS_FOLDERS = {
     "SPAM": "spam",
     "FROZEN": "frozen",
     "UNAUTHORIZED": "unauthorized",
-    "FLOOD": "flood",
+    # FLOOD intentionally excluded — temporary state, account is still alive
 }
 
 

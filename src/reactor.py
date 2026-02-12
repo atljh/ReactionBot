@@ -458,10 +458,14 @@ class Reactor:
                     check_result = await client.check()
 
                 if check_result != "OK":
-                    await self.db.set_account_active(account["id"], False)
+                    is_temporary = check_result.startswith("FLOOD") or check_result == "CONNECTION_ERROR"
+
+                    if not is_temporary:
+                        await self.db.set_account_active(account["id"], False)
+
                     log_error("check", phone, check_result)
 
-                    if self.sessions_dir and get_status_folder(check_result):
+                    if not is_temporary and self.sessions_dir and get_status_folder(check_result):
                         should_move = True
                         move_status = check_result
 

@@ -62,6 +62,10 @@ async def main():
         action="store_true",
         help="Move bad accounts to status folders"
     )
+    parser.add_argument(
+        "--dir",
+        help="Custom sessions directory to check (instead of default sessions/)"
+    )
 
     args = parser.parse_args()
 
@@ -74,7 +78,8 @@ async def main():
     db = Database(settings.database)
     await db.connect()
 
-    loader = SessionLoader(settings.sessions_dir)
+    sessions_dir = Path(args.dir) if args.dir else settings.sessions_dir
+    loader = SessionLoader(sessions_dir)
 
     if args.phone:
         result = loader.get_session(args.phone)

@@ -11,6 +11,7 @@ from telethon.errors import (
     PhoneNumberBannedError,
     UsernameNotOccupiedError,
     UsernameInvalidError,
+    FloodWaitError,
 )
 from .utils import proxy_to_telethon
 
@@ -101,7 +102,15 @@ class BaseThon:
 
     async def connect(self) -> bool:
         await self.client.connect()
-        return await self.client.is_user_authorized()
+        # Use get_me() instead of is_user_authorized() to avoid
+        # swallowing FloodWaitError (which is an RPCError)
+        try:
+            self._me = await self.client.get_me()
+            return self._me is not None
+        except FloodWaitError:
+            raise
+        except Exception:
+            return False
 
     async def disconnect(self):
         if self._client:
@@ -111,23 +120,26 @@ class BaseThon:
         """
         Check account status.
 
-        Args:
-            test_entity: Username to test get_entity() capability.
-                        Default "telegram" (official Telegram account).
+        Uses get_me() instead of is_user_authorized() because
+        is_user_authorized() swallows FloodWaitError as RPCError
+        and returns False, causing live flooded accounts to be
+        mistakenly marked as UNAUTHORIZED.
         """
         try:
             await self.client.connect()
-            if not await self.client.is_user_authorized():
-                return "UNAUTHORIZED"
+
+            # get_me() properly raises FloodWaitError, AuthKeyUnregistered, etc.
+            # unlike is_user_authorized() which catches all RPCError → False
             self._me = await self.client.get_me()
 
+            if self._me is None:
+                return "UNAUTHORIZED"
+
             # Test if account can search for other users/channels
-            # Restricted accounts fail here with "No user has X as username"
             if test_entity:
                 try:
                     await self.client.get_entity(test_entity)
                 except (UsernameNotOccupiedError, UsernameInvalidError):
-                    # Entity doesn't exist - not an account problem
                     pass
                 except Exception as e:
                     error_str = str(e).lower()
@@ -136,6 +148,8 @@ class BaseThon:
                     raise
 
             return "OK"
+        except FloodWaitError as e:
+            return f"FLOOD:{e.seconds}s"
         except (UserDeactivatedError, UserDeactivatedBanError, PhoneNumberBannedError):
             return "BANNED"
         except (AuthKeyUnregisteredError, SessionRevokedError):
@@ -156,6 +170,8 @@ class BaseThon:
                 return "RESTRICTED"
             if "no user has" in error_str:
                 return "SEARCH_RESTRICTED"
+            if "not authorized" in error_str or "unauthorized" in error_str:
+                return "UNAUTHORIZED"
             return f"ERROR:{str(e)[:50]}"
 
     async def get_me(self):
