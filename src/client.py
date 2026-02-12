@@ -142,9 +142,11 @@ class BaseThon:
                     await self.client.get_entity(test_entity)
                 except (UsernameNotOccupiedError, UsernameInvalidError):
                     pass
+                except FloodWaitError:
+                    raise  # bubble up to outer FloodWaitError handler
                 except Exception as e:
                     error_str = str(e).lower()
-                    if "no user has" in error_str or "username" in error_str:
+                    if "no user has" in error_str:
                         return "SEARCH_RESTRICTED"
                     raise
 

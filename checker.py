@@ -20,7 +20,9 @@ async def check_account(session_file: Path, json_file: Path, json_data: dict) ->
     client = BaseThon(session_file=session_file, json_data=json_data)
 
     try:
-        result = await client.check()
+        # test_entity=None — skip get_entity("telegram") during mass check
+        # to avoid FloodWait from 1000+ simultaneous ResolveUsername requests
+        result = await client.check(test_entity=None)
         if result == "OK":
             me = await client.get_me()
             username = f"@{me.username}" if me.username else "-"
