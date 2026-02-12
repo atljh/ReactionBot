@@ -122,20 +122,36 @@ async def main():
         async with semaphore:
             return await check_account(session_file, json_file, json_data)
 
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-    ) as progress:
-        task = progress.add_task("Checking accounts...", total=len(sessions))
+    interrupted = False
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+        ) as progress:
+            task = progress.add_task("Checking accounts...", total=len(sessions))
 
-        tasks = []
-        for session_file, json_file, json_data in sessions:
-            tasks.append(check_with_semaphore(session_file, json_file, json_data))
+            tasks = []
+            for session_file, json_file, json_data in sessions:
+                tasks.append(check_with_semaphore(session_file, json_file, json_data))
 
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            results.append(result)
-            progress.advance(task)
+            for coro in asyncio.as_completed(tasks):
+                try:
+                    result = await coro
+                    results.append(result)
+                    progress.advance(task)
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    interrupted = True
+                    break
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        interrupted = True
+
+    if interrupted:
+        console.print(f"\n[yellow]Interrupted! Showing partial results ({len(results)}/{len(sessions)})[/yellow]\n")
+
+    if not results:
+        console.print("[yellow]No results to show[/yellow]")
+        await db.close()
+        return
 
     table = Table(title="Account Check Results")
     table.add_column("Phone", style="cyan")
