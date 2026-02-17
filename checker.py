@@ -166,6 +166,8 @@ async def main():
     error_count = 0
     moved_count = 0
 
+    frozen_count = 0
+
     for phone, status, username, session_file, json_file in sorted(results, key=lambda x: x[0]):
         if status == "OK":
             if args.move:
@@ -173,18 +175,26 @@ async def main():
             else:
                 table.add_row(phone, "[green]OK[/green]", username)
             ok_count += 1
+
+            # Re-activate OK accounts that were previously marked inactive
+            account = await db.get_account(phone)
+            if account and not account["is_active"]:
+                await db.set_account_active(account["id"], True)
         else:
             action = "-"
+            is_frozen = status.startswith("FROZEN")
+
+            if is_frozen:
+                frozen_count += 1
+                status_display = f"[blue]{status}[/blue]"
+            else:
+                status_display = f"[red]{status}[/red]"
+
             error_count += 1
 
             account = await db.get_account(phone)
             if account:
                 await db.set_account_active(account["id"], False)
-        else:
-            # Re-activate OK accounts that were previously marked inactive
-            account = await db.get_account(phone)
-            if account and not account["is_active"]:
-                await db.set_account_active(account["id"], True)
 
             if args.move and get_status_folder(status):
                 moved = move_account_to_status_folder(
@@ -197,12 +207,17 @@ async def main():
                     moved_count += 1
 
             if args.move:
-                table.add_row(phone, f"[red]{status}[/red]", username, action)
+                table.add_row(phone, status_display, username, action)
             else:
-                table.add_row(phone, f"[red]{status}[/red]", username)
+                table.add_row(phone, status_display, username)
 
     console.print(table)
-    console.print(f"\n[green]OK: {ok_count}[/green] | [red]Errors: {error_count}[/red]")
+
+    summary = f"\n[green]OK: {ok_count}[/green]"
+    if frozen_count > 0:
+        summary += f" | [blue]Frozen: {frozen_count}[/blue]"
+    summary += f" | [red]Errors: {error_count}[/red]"
+    console.print(summary)
     if args.move and moved_count > 0:
         console.print(f"[yellow]Moved: {moved_count}[/yellow]")
 

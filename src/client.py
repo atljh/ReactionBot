@@ -136,6 +136,27 @@ class BaseThon:
             if self._me is None:
                 return "UNAUTHORIZED"
 
+            # Frozen check #1: me.deleted (free, from get_me)
+            if getattr(self._me, "deleted", False):
+                return "FROZEN"
+
+            # Frozen check #2: help.getAppConfig → freeze_since_date
+            # Official read-only API, ref: https://core.telegram.org/api/auth#frozen-accounts
+            try:
+                from telethon.tl.functions.help import GetAppConfigRequest
+                app_config = await self.client(GetAppConfigRequest(hash=0))
+                if hasattr(app_config, 'config'):
+                    for item in app_config.config.value:
+                        if item.key == 'freeze_since_date':
+                            freeze_since = int(item.value.value)
+                            if freeze_since > 0:
+                                return f"FROZEN:{freeze_since}"
+                            break
+            except FloodWaitError:
+                raise
+            except Exception:
+                pass  # getAppConfig failed — not critical
+
             # Test if account can search for other users/channels
             if test_entity:
                 try:
