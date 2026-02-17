@@ -188,6 +188,10 @@ async def sync_sessions(db: Database, loader: SessionLoader, proxies: list):
             )
             console.print(f"  [green]+ Added account: {phone}[/green]")
             synced += 1
+        elif not existing["is_active"]:
+            # Re-activate accounts that exist on disk but were marked inactive
+            await db.set_account_active(existing["id"], True)
+            synced += 1
 
     return synced
 

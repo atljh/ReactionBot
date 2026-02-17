@@ -180,6 +180,11 @@ async def main():
             account = await db.get_account(phone)
             if account:
                 await db.set_account_active(account["id"], False)
+        else:
+            # Re-activate OK accounts that were previously marked inactive
+            account = await db.get_account(phone)
+            if account and not account["is_active"]:
+                await db.set_account_active(account["id"], True)
 
             if args.move and get_status_folder(status):
                 moved = move_account_to_status_folder(
